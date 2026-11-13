@@ -1,0 +1,26 @@
+name: tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: форматирование
+        run: cargo fmt --all -- --check
+      - name: тесты (модель, ошибки, генерация)
+        run: cargo test
+      - name: модель → код (без сборки egui, быстро)
+        run: |
+          cargo run -q -- new /tmp/ci-app --title "CI" --size 320x200
+          cargo run -q -- state /tmp/ci-app count int 0
+          cargo run -q -- add /tmp/ci-app label "Нажатий: {count}"
+          cargo run -q -- add /tmp/ci-app button "Плюс" --do "count += 1"
+          cargo run -q -- show /tmp/ci-app
+          test -f /tmp/ci-app/app/src/main.rs
+          grep -q 'state.count += 1;' /tmp/ci-app/app/src/main.rs
