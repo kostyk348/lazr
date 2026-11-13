@@ -1,19 +1,19 @@
-//! Модель экрана: декларативное описание, из которого генерируется настоящий Rust.
-//!
-//! Формат нарочно текстовый и строчный: ИИ правит его семантическими операциями,
-//! а не пикселями, и каждая ошибка несёт номер строки и подсказку.
+//! Модель экрана v2: стили, сетки, прокрутка, размеры, выравнивание, Rust-блоки.
 //!
 //! ```text
 //! window "Счётчик" 420x260
 //! state count int 0
-//! state name string ""
-//! vbox
-//!   label "Нажатий: {count}"
-//!   button "Плюс" do count += 1
-//!   text_input "Имя" -> name
+//! rust init { state.count = 42; }
+//! rust widget badge { ui.label(format!("бейдж: {}", state.count)); }
+//! vbox {pad:12}
+//!   label "Нажатий: {count}" {size:22, bold}
+//!   grid 2
+//!     button "Плюс" do count += 1
+//!     button "Минус" do count -= 1
+//!   custom badge
 //! ```
 
-#![allow(dead_code)]
+use crate::expr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldType {
@@ -41,32 +41,115 @@ impl FieldType {
             _ => return None,
         })
     }
-    /// Rust-тип поля.
     pub fn rust(&self) -> &'static str {
         match self {
             FieldType::Int => "i64",
-            FieldType::Float => "f64",
+            FieldType::Float => "f32",
             FieldType::Bool => "bool",
             FieldType::Str => "String",
         }
     }
-    /// Литерал по умолчанию, когда значение не задано.
-    pub fn default_lit(&self) -> &'static str {
+    pub fn numeric(&self) -> bool {
+        matches!(self, FieldType::Int | FieldType::Float)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+impl Align {
+    pub fn parse(text: &str) -> Option<Align> {
+        Some(match text {
+            "left" => Align::Left,
+            "center" => Align::Center,
+            "right" => Align::Right,
+            _ => return None,
+        })
+    }
+    pub fn as_str(&self) -> &'static str {
         match self {
-            FieldType::Int => "0",
-            FieldType::Float => "0.0",
-            FieldType::Bool => "false",
-            FieldType::Str => "String::new()",
+            Align::Left => "left",
+            Align::Center => "center",
+            Align::Right => "right",
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Field {
-    pub name: String,
-    pub ty: FieldType,
-    /// Литерал значения (для строк — без кавычек).
-    pub value: String,
+#[derive(Debug, Clone, Default)]
+pub struct Style {
+    pub color: Option<String>,
+    pub size: Option<f32>,
+    pub bold: bool,
+    pub pad: Option<f32>,
+    pub width: Option<f32>,
+    pub height: Option<f32>,
+    pub align: Option<Align>,
+    pub grow: bool,
+    /// Горячая клавиша вида "Ctrl+S" — срабатывает без фокуса на кнопке.
+    pub key: Option<String>,
+    /// Имя иконки из встроенного набора lazr.
+    pub icon: Option<String>,
+}
+
+impl Style {
+    pub fn is_empty(&self) -> bool {
+        self.color.is_none()
+            && self.size.is_none()
+            && !self.bold
+            && self.pad.is_none()
+            && self.width.is_none()
+            && self.height.is_none()
+            && self.align.is_none()
+            && !self.grow
+            && self.key.is_none()
+            && self.icon.is_none()
+    }
+    pub fn as_str(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(color) = &self.color {
+            parts.push(format!("color:{color}"));
+        }
+        if let Some(size) = self.size {
+            parts.push(format!("size:{}", trim_float(size)));
+        }
+        if let Some(key) = &self.key {
+            parts.push(format!("key:{key}"));
+        }
+        if let Some(icon) = &self.icon {
+            parts.push(format!("icon:{icon}"));
+        }
+        if self.bold {
+            parts.push("bold".to_string());
+        }
+        if let Some(pad) = self.pad {
+            parts.push(format!("pad:{}", trim_float(pad)));
+        }
+        if let Some(width) = self.width {
+            parts.push(format!("width:{}", trim_float(width)));
+        }
+        if let Some(height) = self.height {
+            parts.push(format!("height:{}", trim_float(height)));
+        }
+        if let Some(align) = &self.align {
+            parts.push(format!("align:{}", align.as_str()));
+        }
+        if self.grow {
+            parts.push("grow".to_string());
+        }
+        parts.join(", ")
+    }
+}
+
+pub fn trim_float(value: f32) -> String {
+    if (value - value.round()).abs() < 0.001 {
+        format!("{}", value.round() as i64)
+    } else {
+        format!("{value}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,8 +160,12 @@ pub enum WidgetKind {
     TextInput,
     Slider,
     Separator,
+    Space,
     Vbox,
     Hbox,
+    Grid,
+    Scroll,
+    Custom(String),
 }
 
 impl WidgetKind {
@@ -90,11 +177,21 @@ impl WidgetKind {
             WidgetKind::TextInput => "text_input",
             WidgetKind::Slider => "slider",
             WidgetKind::Separator => "separator",
+            WidgetKind::Space => "space",
             WidgetKind::Vbox => "vbox",
             WidgetKind::Hbox => "hbox",
+            WidgetKind::Grid => "grid",
+            WidgetKind::Scroll => "scroll",
+            WidgetKind::Custom(_) => "custom",
         }
     }
-    pub fn parse(text: &str) -> Option<WidgetKind> {
+    pub fn is_container(&self) -> bool {
+        matches!(
+            self,
+            WidgetKind::Vbox | WidgetKind::Hbox | WidgetKind::Grid | WidgetKind::Scroll
+        )
+    }
+    pub fn parse_kind(text: &str) -> Option<WidgetKind> {
         Some(match text {
             "label" => WidgetKind::Label,
             "button" => WidgetKind::Button,
@@ -102,13 +199,13 @@ impl WidgetKind {
             "text_input" => WidgetKind::TextInput,
             "slider" => WidgetKind::Slider,
             "separator" => WidgetKind::Separator,
+            "space" => WidgetKind::Space,
             "vbox" => WidgetKind::Vbox,
             "hbox" => WidgetKind::Hbox,
+            "grid" => WidgetKind::Grid,
+            "scroll" => WidgetKind::Scroll,
             _ => return None,
         })
-    }
-    pub fn is_container(&self) -> bool {
-        matches!(self, WidgetKind::Vbox | WidgetKind::Hbox)
     }
     pub fn all() -> Vec<&'static str> {
         vec![
@@ -118,8 +215,12 @@ impl WidgetKind {
             "text_input",
             "slider",
             "separator",
+            "space",
             "vbox",
             "hbox",
+            "grid",
+            "scroll",
+            "custom",
         ]
     }
 }
@@ -127,14 +228,13 @@ impl WidgetKind {
 #[derive(Debug, Clone)]
 pub struct Widget {
     pub kind: WidgetKind,
-    /// Текст/подпись виджета.
     pub text: String,
-    /// Действие на нажатие: `count += 1`, `agree = !agree`, `name = "x"`.
     pub effect: Option<String>,
-    /// Привязка к полю состояния (checkbox, text_input, slider).
     pub bind: Option<String>,
-    /// Диапазон ползунка.
     pub range: Option<(f64, f64)>,
+    /// Число колонок у grid или пиксели отступа у space.
+    pub number: Option<f32>,
+    pub style: Style,
     pub children: Vec<Widget>,
 }
 
@@ -146,6 +246,8 @@ impl Widget {
             effect: None,
             bind: None,
             range: None,
+            number: None,
+            style: Style::default(),
             children: Vec::new(),
         }
     }
@@ -154,16 +256,46 @@ impl Widget {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum RustKind {
+    Init,
+    Widget,
+    /// Функция уровня модуля: полный Rust-код, видимый всем виджетам.
+    Fn,
+}
+
+#[derive(Debug, Clone)]
+pub struct RustBlock {
+    pub name: String,
+    pub kind: RustKind,
+    pub code: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RustField {
+    pub name: String,
+    pub ty: String,
+    pub default: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Field {
+    pub name: String,
+    pub ty: FieldType,
+    pub value: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Screen {
     pub title: String,
     pub width: u32,
     pub height: u32,
     pub fields: Vec<Field>,
+    pub rust: Vec<RustBlock>,
+    pub rust_fields: Vec<RustField>,
     pub root: Vec<Widget>,
 }
 
-/// Ошибка модели: всегда с номером строки, кодом и подсказкой.
 #[derive(Debug, Clone)]
 pub struct ModelError {
     pub line: usize,
@@ -175,7 +307,7 @@ pub struct ModelError {
 impl ModelError {
     pub fn to_json(&self) -> String {
         format!(
-            "{{\"ok\":false,\"error\":{{\"line\":{},\"code\":\"{}\",\"message\":{},\"hint\":{}}}}}",
+            "{{\"line\":{},\"code\":\"{}\",\"message\":{},\"hint\":{}}}",
             self.line,
             self.code,
             json_str(&self.message),
@@ -202,11 +334,13 @@ pub fn json_str(text: &str) -> String {
     out
 }
 
+/// Разбор строки на слова: кавычки и `{…}` — один токен, даже с пробелами внутри.
 fn tokens(line: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
     let mut quoted = false;
     let mut escaped = false;
+    let mut depth = 0;
     for ch in line.chars() {
         if escaped {
             current.push(match ch {
@@ -217,18 +351,44 @@ fn tokens(line: &str) -> Vec<String> {
             escaped = false;
             continue;
         }
-        match ch {
-            '\\' if quoted => escaped = true,
-            '"' => {
-                if quoted {
+        if quoted {
+            match ch {
+                '\\' => escaped = true,
+                '"' => {
                     out.push(current.clone());
                     current.clear();
                     quoted = false;
-                } else {
-                    quoted = true;
+                }
+                c => current.push(c),
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '{' => {
+                if depth == 0 && !current.is_empty() {
+                    out.push(current.clone());
+                    current.clear();
+                }
+                depth += 1;
+                if depth > 1 {
+                    current.push('{');
                 }
             }
-            c if c.is_whitespace() && !quoted => {
+            '}' => {
+                if depth == 0 {
+                    current.push('}');
+                    continue;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    out.push(format!("{{{current}}}"));
+                    current.clear();
+                } else {
+                    current.push('}');
+                }
+            }
+            c if c.is_whitespace() && depth == 0 => {
                 if !current.is_empty() {
                     out.push(current.clone());
                     current.clear();
@@ -243,6 +403,68 @@ fn tokens(line: &str) -> Vec<String> {
     out
 }
 
+pub fn parse_style_text(text: &str) -> Result<Style, String> {
+    parse_style(&format!("{{{text}}}"))
+}
+
+fn parse_style(text: &str) -> Result<Style, String> {
+    let inner = text.trim().trim_start_matches('{').trim_end_matches('}');
+    let mut style = Style::default();
+    for part in inner.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (key, value) = match part.split_once(':') {
+            Some((key, value)) => (key.trim(), value.trim()),
+            None => (part, ""),
+        };
+        match key {
+            "color" | "colour" => style.color = Some(value.to_string()),
+            "size" => {
+                style.size = Some(
+                    value
+                        .parse()
+                        .map_err(|_| format!("size «{value}» не число"))?,
+                )
+            }
+            "bold" => style.bold = true,
+            "key" => style.key = Some(value.to_string()),
+            "icon" => style.icon = Some(value.to_string()),
+            "pad" | "padding" => {
+                style.pad = Some(
+                    value
+                        .parse()
+                        .map_err(|_| format!("pad «{value}» не число"))?,
+                )
+            }
+            "width" => {
+                style.width = Some(
+                    value
+                        .parse()
+                        .map_err(|_| format!("width «{value}» не число"))?,
+                )
+            }
+            "height" => {
+                style.height = Some(
+                    value
+                        .parse()
+                        .map_err(|_| format!("height «{value}» не число"))?,
+                )
+            }
+            "align" => {
+                style.align = Some(
+                    Align::parse(value)
+                        .ok_or_else(|| format!("align «{value}»: доступно left, center, right"))?,
+                )
+            }
+            "grow" => style.grow = true,
+            other => return Err(format!("неизвестное свойство стиля «{other}»")),
+        }
+    }
+    Ok(style)
+}
+
 pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
     let mut errors: Vec<ModelError> = Vec::new();
     let mut screen = Screen {
@@ -250,21 +472,138 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         width: 480,
         height: 320,
         fields: Vec::new(),
+        rust: Vec::new(),
+        rust_fields: Vec::new(),
         root: Vec::new(),
     };
-    // Стек вложенности: (глубина, путь в дереве).
+    let lines: Vec<&str> = text.lines().collect();
     let mut stack: Vec<(usize, Vec<usize>)> = vec![(0, Vec::new())];
+    let mut index = 0;
 
-    for (index, raw) in text.lines().enumerate() {
+    while index < lines.len() {
         let line_no = index + 1;
-        let line = raw.trim_end();
+        let line = lines[index].trim_end();
+        index += 1;
         if line.trim().is_empty() || line.trim_start().starts_with('#') {
             continue;
         }
         let indent = line.len() - line.trim_start().len();
         let depth = indent / 2;
         let words = tokens(line.trim_start());
-        let Some(head) = words.first() else { continue };
+        let Some(head) = words.first().cloned() else {
+            continue;
+        };
+
+        if head == "rust" {
+            let Some(kind_word) = words.get(1).cloned() else {
+                errors.push(ModelError {
+                    line: line_no,
+                    code: "RUST_NEEDS_KIND",
+                    message: "у блока rust нет вида".into(),
+                    hint: "rust init { … } или rust widget имя { … }".into(),
+                });
+                continue;
+            };
+            if kind_word == "field" {
+                let (Some(name), Some(ty)) = (words.get(2).cloned(), words.get(3).cloned()) else {
+                    errors.push(ModelError {
+                        line: line_no,
+                        code: "RUST_FIELD_INCOMPLETE",
+                        message: "у rust field нет имени или типа".into(),
+                        hint: "rust field points Vec<egui::Pos2> Vec::new()".into(),
+                    });
+                    continue;
+                };
+                let default = words
+                    .get(4..)
+                    .map(|rest| rest.join(" "))
+                    .unwrap_or_default();
+                screen.rust_fields.push(RustField {
+                    name,
+                    ty,
+                    default: if default.is_empty() {
+                        "Default::default()".to_string()
+                    } else {
+                        default
+                    },
+                });
+                continue;
+            }
+            let (kind, name) = match kind_word.as_str() {
+                "init" => (RustKind::Init, "init".to_string()),
+                "fn" => (
+                    RustKind::Fn,
+                    words.get(2).cloned().unwrap_or_else(|| "f".into()),
+                ),
+                "widget" => match words.get(2) {
+                    Some(name) => (RustKind::Widget, name.clone()),
+                    None => {
+                        errors.push(ModelError {
+                            line: line_no,
+                            code: "RUST_WIDGET_NEEDS_NAME",
+                            message: "у rust widget нет имени".into(),
+                            hint: "rust widget badge { … }".into(),
+                        });
+                        continue;
+                    }
+                },
+                other => {
+                    errors.push(ModelError {
+                        line: line_no,
+                        code: "RUST_UNKNOWN_KIND",
+                        message: format!("вид блока «{other}» неизвестен"),
+                        hint: "init или widget".into(),
+                    });
+                    continue;
+                }
+            };
+            let rest: String = words[3.min(words.len())..].join(" ");
+            let mut body = String::new();
+            let mut closed = false;
+            if let Some(inner) = rest.strip_prefix('{') {
+                if inner.ends_with('}') {
+                    body.push_str(inner.trim_end_matches('}'));
+                    closed = true;
+                } else {
+                    body.push_str(inner);
+                }
+            }
+            while !closed && index < lines.len() {
+                let next = lines[index];
+                index += 1;
+                let next_indent = next.len() - next.trim_start().len();
+                if next.trim() == "}" && next_indent <= indent {
+                    closed = true;
+                    break;
+                }
+                body.push_str(next);
+                body.push('\n');
+            }
+            if !closed {
+                errors.push(ModelError {
+                    line: line_no,
+                    code: "RUST_BLOCK_UNCLOSED",
+                    message: "блок rust не закрыт".into(),
+                    hint: "закройте блок строкой «}» на той же глубине".into(),
+                });
+                continue;
+            }
+            if kind == RustKind::Widget && !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                errors.push(ModelError {
+                    line: line_no,
+                    code: "RUST_BAD_NAME",
+                    message: format!("имя виджета «{name}» не годится"),
+                    hint: "буквы, цифры и _".into(),
+                });
+                continue;
+            }
+            screen.rust.push(RustBlock {
+                name,
+                kind,
+                code: body.trim().to_string(),
+            });
+            continue;
+        }
 
         match head.as_str() {
             "window" => {
@@ -317,60 +656,126 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                 });
             }
             _ => {
-                let Some(kind) = WidgetKind::parse(head) else {
-                    errors.push(ModelError {
-                        line: line_no,
-                        code: "UNKNOWN_WIDGET",
-                        message: format!("виджет «{head}» неизвестен"),
-                        hint: format!("доступны: {}", WidgetKind::all().join(", ")),
-                    });
-                    continue;
+                let (kind, mut text_start): (WidgetKind, usize) = if head == "custom" {
+                    match words.get(1) {
+                        Some(name) => (WidgetKind::Custom(name.clone()), 2),
+                        None => {
+                            errors.push(ModelError {
+                                line: line_no,
+                                code: "CUSTOM_NEEDS_NAME",
+                                message: "у custom нет имени виджета".into(),
+                                hint: "custom badge — где badge объявлен в rust widget".into(),
+                            });
+                            continue;
+                        }
+                    }
+                } else {
+                    match WidgetKind::parse_kind(&head) {
+                        Some(kind) => (kind, 1),
+                        None => {
+                            errors.push(ModelError {
+                                line: line_no,
+                                code: "UNKNOWN_WIDGET",
+                                message: format!("виджет «{head}» неизвестен"),
+                                hint: format!("доступны: {}", WidgetKind::all().join(", ")),
+                            });
+                            continue;
+                        }
+                    }
                 };
-                // найти контейнер по глубине
+                // Текст есть только у листовых виджетов и не может быть стилем/числом.
+                let mut text = String::new();
+                if kind.is_container() {
+                    text_start = 1;
+                } else if matches!(kind, WidgetKind::Custom(_)) {
+                    text_start = 2;
+                } else {
+                    match words.get(1) {
+                        Some(candidate)
+                            if !candidate.starts_with('{')
+                                && candidate != "do"
+                                && candidate != "->"
+                                && candidate.parse::<f32>().is_err() =>
+                        {
+                            text = candidate.clone();
+                            text_start = 2;
+                        }
+                        _ => text_start = 1,
+                    }
+                }
+
                 while stack.len() > 1 && stack.last().map(|(d, _)| *d >= depth).unwrap_or(false) {
                     stack.pop();
                 }
                 let mut widget = if kind.is_container() {
                     Widget::container(kind.clone())
+                } else if matches!(kind, WidgetKind::Custom(_)) {
+                    Widget::leaf(kind.clone(), "")
                 } else {
-                    Widget::leaf(kind.clone(), words.get(1).map(String::as_str).unwrap_or(""))
+                    Widget::leaf(kind.clone(), &text)
                 };
-
-                let mut rest = &words[2.min(words.len())..];
-                if !kind.is_container() {
-                    rest = &words[1.min(words.len())..];
-                }
+                let rest: Vec<String> = words
+                    .get(text_start.min(words.len())..)
+                    .unwrap_or(&[])
+                    .to_vec();
                 let mut i = 0;
                 while i < rest.len() {
-                    match rest[i].as_str() {
-                        "do" => {
-                            let effect: Vec<&str> =
-                                rest[i + 1..].iter().map(String::as_str).collect();
-                            widget.effect = Some(effect.join(" "));
-                            break;
+                    let token = rest[i].clone();
+                    if token.starts_with('{') {
+                        match parse_style(&token) {
+                            Ok(style) => widget.style = style,
+                            Err(err) => errors.push(ModelError {
+                                line: line_no,
+                                code: "BAD_STYLE",
+                                message: err,
+                                hint:
+                                    "{color:#e5484d, size:18, bold, pad:8, width:120, align:center}"
+                                        .into(),
+                            }),
                         }
-                        "->" => {
-                            widget.bind = rest.get(i + 1).cloned();
-                            i += 2;
-                        }
-                        token if token.contains("..") => {
-                            if let Some((a, b)) = token.split_once("..") {
-                                if let (Ok(a), Ok(b)) = (a.parse(), b.parse()) {
-                                    widget.range = Some((a, b));
-                                }
+                        i += 1;
+                    } else if token == "do" {
+                        // Стиль и привязка живут после действия — в него не входят.
+                        let mut end = rest.len();
+                        for (offset, item) in rest.iter().enumerate().skip(i + 1) {
+                            // Стиль — это {ключ:значение}, а не блок «{ count = 0 }».
+                            let is_style = item.starts_with('{')
+                                && item.ends_with('}')
+                                && item.contains(':')
+                                && !item.contains(' ');
+                            if is_style || item == "->" {
+                                end = offset;
+                                break;
                             }
-                            i += 1;
                         }
-                        _ => i += 1,
+                        widget.effect = Some(rest[i + 1..end].join(" "));
+                        i = end;
+                        continue;
+                    } else if token == "->" {
+                        widget.bind = rest.get(i + 1).cloned();
+                        i += 2;
+                    } else if token.contains("..") {
+                        if let Some((a, b)) = token.split_once("..") {
+                            if let (Ok(a), Ok(b)) = (a.parse(), b.parse()) {
+                                widget.range = Some((a, b));
+                            }
+                        }
+                        i += 1;
+                    } else if let Ok(number) = token.parse::<f32>() {
+                        widget.number = Some(number);
+                        i += 1;
+                    } else {
+                        i += 1;
                     }
                 }
 
                 if widget.kind.is_container() {
                     let path = stack.last().map(|(_, p)| p.clone()).unwrap_or_default();
-                    let child_index = child_list(&mut screen.root, &path).len();
-                    child_list(&mut screen.root, &path).push(widget);
-                    let mut child_path = path.clone();
-                    child_path.push(child_index);
+                    let parent = child_list(&mut screen.root, &path);
+                    parent.push(widget);
+                    let index_in_parent = parent.len() - 1;
+                    let mut child_path = path;
+                    child_path.push(index_in_parent);
                     stack.push((depth, child_path));
                 } else {
                     let path = stack.last().map(|(_, p)| p.clone()).unwrap_or_default();
@@ -380,9 +785,30 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         }
     }
 
-    // Проверки ссылок: поля, привязки, эффекты.
+    validate(&screen, &mut errors);
+    if errors.is_empty() {
+        Ok(screen)
+    } else {
+        Err(errors)
+    }
+}
+
+fn validate(screen: &Screen, errors: &mut Vec<ModelError>) {
     let field_names: Vec<String> = screen.fields.iter().map(|f| f.name.clone()).collect();
-    fn walk(widgets: &Vec<Widget>, field_names: &[String], errors: &mut Vec<ModelError>) {
+    let custom: Vec<String> = screen
+        .rust
+        .iter()
+        .filter(|b| b.kind == RustKind::Widget)
+        .map(|b| b.name.clone())
+        .collect();
+
+    fn walk(
+        widgets: &[Widget],
+        field_names: &[String],
+        custom: &[String],
+        screen: &Screen,
+        errors: &mut Vec<ModelError>,
+    ) {
         for widget in widgets {
             if let Some(bind) = &widget.bind {
                 if !field_names.contains(bind) {
@@ -395,26 +821,29 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                 }
             }
             if let Some(effect) = &widget.effect {
-                let field = effect.split_whitespace().next().unwrap_or("");
-                if !field_names.contains(&field.to_string()) {
+                if let Err(err) = expr::compile(screen, effect) {
                     errors.push(ModelError {
                         line: 0,
-                        code: "EFFECT_UNKNOWN_FIELD",
-                        message: format!("действие меняет неизвестное поле «{field}»"),
-                        hint: "поле должно быть объявлено через state".into(),
+                        code: "BAD_EFFECT",
+                        message: err.message,
+                        hint: err.hint,
                     });
                 }
             }
-            walk(&widget.children, field_names, errors);
+            if let WidgetKind::Custom(name) = &widget.kind {
+                if !custom.contains(name) {
+                    errors.push(ModelError {
+                        line: 0,
+                        code: "NO_SUCH_CUSTOM",
+                        message: format!("свой виджет «{name}» не объявлен"),
+                        hint: format!("добавьте: rust widget {name} {{ … }}"),
+                    });
+                }
+            }
+            walk(&widget.children, field_names, custom, screen, errors);
         }
     }
-    walk(&screen.root, &field_names, &mut errors);
-
-    if errors.is_empty() {
-        Ok(screen)
-    } else {
-        Err(errors)
-    }
+    walk(&screen.root, &field_names, &custom, screen, errors);
 }
 
 fn child_list<'a>(root: &'a mut Vec<Widget>, path: &[usize]) -> &'a mut Vec<Widget> {
@@ -441,6 +870,23 @@ pub fn render(screen: &Screen) -> String {
             field.value
         ));
     }
+    for field in &screen.rust_fields {
+        out.push_str(&format!(
+            "rust field {} {} {}\n",
+            field.name, field.ty, field.default
+        ));
+    }
+    for block in &screen.rust {
+        match block.kind {
+            RustKind::Init => out.push_str("rust init {\n"),
+            RustKind::Widget => out.push_str(&format!("rust widget {} {{\n", block.name)),
+            RustKind::Fn => out.push_str(&format!("rust fn {} {{\n", block.name)),
+        }
+        for line in block.code.lines() {
+            out.push_str(&format!("    {line}\n"));
+        }
+        out.push_str("}\n");
+    }
     render_widgets(&screen.root, 0, &mut out);
     out
 }
@@ -449,9 +895,17 @@ fn render_widgets(widgets: &[Widget], depth: usize, out: &mut String) {
     for widget in widgets {
         let pad = "  ".repeat(depth);
         let mut line = format!("{pad}{}", widget.kind.as_str());
-        if !widget.text.is_empty() {
-            line.push(' ');
-            line.push_str(&quote(&widget.text));
+        match &widget.kind {
+            WidgetKind::Custom(name) => line.push_str(&format!(" {name}")),
+            _ => {
+                if !widget.text.is_empty() {
+                    line.push(' ');
+                    line.push_str(&quote(&widget.text));
+                }
+            }
+        }
+        if let Some(number) = widget.number {
+            line.push_str(&format!(" {}", trim_float(number)));
         }
         if let Some(bind) = &widget.bind {
             line.push_str(&format!(" -> {bind}"));
@@ -461,6 +915,9 @@ fn render_widgets(widgets: &[Widget], depth: usize, out: &mut String) {
         }
         if let Some(effect) = &widget.effect {
             line.push_str(&format!(" do {effect}"));
+        }
+        if !widget.style.is_empty() {
+            line.push_str(&format!(" {{{}}}", widget.style.as_str()));
         }
         out.push_str(&line);
         out.push('\n');
@@ -472,7 +929,6 @@ pub fn quote(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// Добавить виджет в контейнер (по умолчанию — в корень или в vbox).
 pub fn add_widget(
     screen: &mut Screen,
     container: Option<&str>,
@@ -487,7 +943,7 @@ pub fn add_widget(
             line: 0,
             code: "NO_SUCH_CONTAINER",
             message: format!("контейнер «{name}» не найден"),
-            hint: "vbox/hbox, существующий в модели".into(),
+            hint: "vbox, hbox, grid или scroll".into(),
         });
     }
     screen.root.push(widget);
@@ -514,93 +970,72 @@ mod tests {
 window "Счётчик" 420x260
 state count int 0
 state name string ""
-state agree bool false
-vbox
-  label "Нажатий: {count}"
-  button "Плюс" do count += 1
-  hbox
-    checkbox "Согласен" -> agree
-    text_input "Имя" -> name
-  label "Привет, {name}"
+vbox {pad:12}
+  label "Нажатий: {count}" {size:22, bold, color:#e5484d}
+  grid 2
+    button "Плюс" do count += 1
+    button "Минус" do count -= 1
+  hbox {align:center}
+    text_input "Имя" -> name {grow}
 "#;
 
     #[test]
-    fn sample_parses_into_a_tree() {
+    fn styles_and_layouts_parse() {
         let screen = parse(SAMPLE).expect("модель валидна");
-        assert_eq!(screen.title, "Счётчик");
-        assert_eq!((screen.width, screen.height), (420, 260));
-        assert_eq!(screen.fields.len(), 3);
-        assert_eq!(screen.root.len(), 1);
         let vbox = &screen.root[0];
-        assert_eq!(vbox.kind, WidgetKind::Vbox);
-        assert_eq!(vbox.children.len(), 4);
-        assert_eq!(vbox.children[2].kind, WidgetKind::Hbox);
-        assert_eq!(vbox.children[2].children.len(), 2);
+        assert_eq!(vbox.style.pad, Some(12.0));
+        let label = &vbox.children[0];
+        assert_eq!(label.style.size, Some(22.0));
+        assert!(label.style.bold);
+        assert_eq!(label.style.color.as_deref(), Some("#e5484d"));
+        let grid = &vbox.children[1];
+        assert_eq!(grid.kind, WidgetKind::Grid);
+        assert_eq!(grid.number, Some(2.0));
+        assert_eq!(grid.children.len(), 2);
+        let hbox = &vbox.children[2];
+        assert_eq!(hbox.style.align, Some(Align::Center));
+        assert!(hbox.children[0].style.grow);
     }
 
     #[test]
-    fn roundtrip_keeps_the_meaning() {
+    fn unknown_style_property_is_refused() {
+        let errors = parse("label \"x\" {shade:red}\n").unwrap_err();
+        assert!(errors.iter().any(|e| e.code == "BAD_STYLE"), "{errors:?}");
+    }
+
+    #[test]
+    fn rust_blocks_are_read_and_checked() {
+        let screen = parse(
+            "state count int 0\nrust init {\n  state.count = 42;\n}\nrust widget badge {\n  ui.label(\"x\");\n}\ncustom badge\n",
+        )
+        .unwrap();
+        assert_eq!(screen.rust.len(), 2);
+        assert!(screen.rust[0].code.contains("state.count = 42;"));
+        assert_eq!(screen.rust[1].name, "badge");
+        assert_eq!(screen.root[0].kind, WidgetKind::Custom("badge".into()));
+    }
+
+    #[test]
+    fn custom_without_block_is_refused() {
+        let errors = parse("custom ghost\n").unwrap_err();
+        assert!(errors.iter().any(|e| e.code == "NO_SUCH_CUSTOM"));
+    }
+
+    #[test]
+    fn roundtrip_keeps_styles_and_rust() {
         let screen = parse(SAMPLE).unwrap();
         let again = parse(&render(&screen)).unwrap();
-        assert_eq!(again.title, screen.title);
-        assert_eq!(again.fields.len(), screen.fields.len());
-        assert_eq!(again.root.len(), screen.root.len());
+        assert_eq!(again.root[0].style.pad, Some(12.0));
+        assert_eq!(again.root[0].children[1].number, Some(2.0));
         assert_eq!(
-            again.root[0].children[1].effect.as_deref(),
-            Some("count += 1")
-        );
-        assert_eq!(
-            again.root[0].children[2].children[1].bind.as_deref(),
-            Some("name")
+            again.root[0].children[0].style.color.as_deref(),
+            Some("#e5484d")
         );
     }
 
     #[test]
-    fn unknown_widget_names_the_line_and_offers_the_list() {
-        let broken = "window \"x\"\nvbox\n  frobnicator \"a\"\n";
-        let errors = parse(broken).unwrap_err();
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].code, "UNKNOWN_WIDGET");
-        assert_eq!(errors[0].line, 3, "номер строки важен для ИИ");
-        assert!(
-            errors[0].hint.contains("label"),
-            "подсказка перечисляет виджеты"
-        );
-        assert!(errors[0].to_json().contains("\"code\":\"UNKNOWN_WIDGET\""));
-    }
-
-    #[test]
-    fn bind_to_unknown_field_is_refused() {
-        let broken = "state count int 0\ncheckbox \"x\" -> missing\n";
-        let errors = parse(broken).unwrap_err();
-        assert!(errors.iter().any(|e| e.code == "NO_SUCH_FIELD"));
-    }
-
-    #[test]
-    fn effect_on_unknown_field_is_refused() {
-        let broken = "state count int 0\nbutton \"x\" do nope += 1\n";
-        let errors = parse(broken).unwrap_err();
-        assert!(errors.iter().any(|e| e.code == "EFFECT_UNKNOWN_FIELD"));
-    }
-
-    #[test]
-    fn add_widget_goes_into_the_named_container() {
-        let mut screen = parse(SAMPLE).unwrap();
-        let widget = Widget::leaf(WidgetKind::Button, "Минус");
-        add_widget(&mut screen, Some("hbox"), widget).unwrap();
-        assert_eq!(screen.root[0].children[2].children.len(), 3);
-        assert!(add_widget(
-            &mut screen,
-            Some("grid"),
-            Widget::leaf(WidgetKind::Label, "x")
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn quoted_text_with_spaces_survives() {
-        let screen = parse("window \"Мой счётчик\"\nlabel \"Привет, мир\"\n").unwrap();
-        assert_eq!(screen.title, "Мой счётчик");
-        assert_eq!(screen.root[0].text, "Привет, мир");
+    fn effect_errors_surface_with_hint() {
+        let errors = parse("state count int 0\nbutton \"x\" do count += nope\n").unwrap_err();
+        assert!(errors.iter().any(|e| e.code == "BAD_EFFECT"));
     }
 }

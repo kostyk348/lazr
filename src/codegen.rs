@@ -1,10 +1,10 @@
 //! Генерация настоящего приложения: Cargo.toml + src/main.rs на egui/eframe.
 //!
-//! Генерация детерминированная: одна модель — один и тот же текст, поэтому её можно
-//! класть в git и смотреть diff. Никакой «магии шаблонов»: то, что видит ИИ в модели,
-//! он же видит в коде.
+//! Генерация детерминированная: одна модель — один и тот же текст, поэтому её
+//! можно класть в git и смотреть diff.
 
-use crate::model::{FieldType, Screen, Widget, WidgetKind};
+use crate::expr;
+use crate::model::{Align, FieldType, RustKind, Screen, Widget, WidgetKind};
 
 pub const EGUI_VERSION: &str = "=0.37.0";
 
@@ -30,7 +30,7 @@ strip = true
     )
 }
 
-fn crate_name(text: &str) -> String {
+pub fn crate_name(text: &str) -> String {
     // Cargo принимает только ASCII: кириллица из заголовка в имя пакета не идёт.
     let cleaned: String = text
         .chars()
@@ -52,6 +52,19 @@ fn crate_name(text: &str) -> String {
     trimmed
 }
 
+pub fn bin_name(screen: &Screen) -> String {
+    crate_name(&screen.title)
+}
+
+/// Литерал f32: у Rust `8` — целое, а `8.0` — число с плавающей точкой.
+fn float_lit(value: f32) -> String {
+    if value.fract().abs() < f32::EPSILON {
+        format!("{:.1}", value)
+    } else {
+        format!("{value}")
+    }
+}
+
 fn rust_string(text: &str) -> String {
     let mut out = String::from("\"");
     for ch in text.chars() {
@@ -66,7 +79,14 @@ fn rust_string(text: &str) -> String {
     out
 }
 
-/// Текст с подстановками `{field}` → `format!("…{}…", state.field)`.
+fn field_type(screen: &Screen, name: &str) -> Option<FieldType> {
+    screen
+        .fields
+        .iter()
+        .find(|f| f.name == name)
+        .map(|f| f.ty.clone())
+}
+
 fn text_expr(text: &str, screen: &Screen) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut args: Vec<String> = Vec::new();
@@ -75,14 +95,16 @@ fn text_expr(text: &str, screen: &Screen) -> String {
     while let Some(ch) = chars.next() {
         if ch == '{' {
             let mut name = String::new();
+            let mut closed = false;
             while let Some(&next) = chars.peek() {
                 chars.next();
                 if next == '}' {
+                    closed = true;
                     break;
                 }
                 name.push(next);
             }
-            if screen.fields.iter().any(|f| f.name == name) {
+            if closed && screen.fields.iter().any(|f| f.name == name) {
                 parts.push(current.clone());
                 current.clear();
                 args.push(format!("state.{name}"));
@@ -90,14 +112,16 @@ fn text_expr(text: &str, screen: &Screen) -> String {
             }
             current.push('{');
             current.push_str(&name);
-            current.push('}');
+            if closed {
+                current.push('}');
+            }
         } else {
             current.push(ch);
         }
     }
     parts.push(current);
     if args.is_empty() {
-        rust_string(text)
+        format!("{}.to_string()", rust_string(text))
     } else {
         format!(
             "format!({}, {})",
@@ -107,164 +131,429 @@ fn text_expr(text: &str, screen: &Screen) -> String {
     }
 }
 
-fn field_type(screen: &Screen, name: &str) -> Option<FieldType> {
-    screen
-        .fields
-        .iter()
-        .find(|f| f.name == name)
-        .map(|f| f.ty.clone())
+/// Цвет: `#rrggbb`, `#rgb` или имя.
+fn color_code(color: &str) -> Option<String> {
+    let named = match color.to_ascii_lowercase().as_str() {
+        "red" => Some((229, 72, 77)),
+        "green" => Some((57, 211, 83)),
+        "blue" => Some((56, 139, 253)),
+        "orange" => Some((232, 132, 60)),
+        "yellow" => Some((211, 180, 57)),
+        "gray" | "grey" => Some((139, 148, 158)),
+        "white" => Some((240, 246, 252)),
+        "black" => Some((13, 17, 23)),
+        _ => None,
+    };
+    if let Some((r, g, b)) = named {
+        return Some(format!("egui::Color32::from_rgb({r}, {g}, {b})"));
+    }
+    let hex = color.trim_start_matches('#');
+    let (r, g, b) = match hex.len() {
+        6 => (
+            u8::from_str_radix(&hex[0..2], 16).ok()?,
+            u8::from_str_radix(&hex[2..4], 16).ok()?,
+            u8::from_str_radix(&hex[4..6], 16).ok()?,
+        ),
+        3 => {
+            let expand = |c: char| u8::from_str_radix(&format!("{c}{c}"), 16).ok();
+            let mut chars = hex.chars();
+            (
+                expand(chars.next()?)?,
+                expand(chars.next()?)?,
+                expand(chars.next()?)?,
+            )
+        }
+        _ => return None,
+    };
+    Some(format!("egui::Color32::from_rgb({r}, {g}, {b})"))
 }
 
-/// Действие → строка Rust. Ошибка вместо догадки, если формат незнаком.
-pub fn effect_code(screen: &Screen, effect: &str) -> Result<String, String> {
-    let text = effect.trim();
-    if text.is_empty() {
-        return Err("пустое действие".to_string());
+/// Иконки: имена → глифы, которые есть в шрифтах egui по умолчанию.
+pub fn icon_glyph(name: &str) -> Option<&'static str> {
+    const ICONS: &[(&str, &str)] = &[
+        ("save", "💾"),
+        ("open", "📂"),
+        ("new", "➕"),
+        ("delete", "🗑"),
+        ("undo", "↩"),
+        ("redo", "↪"),
+        ("pencil", "✏"),
+        ("brush", "🖌"),
+        ("eraser", "◻"),
+        ("line", "╱"),
+        ("rect", "▭"),
+        ("ellipse", "◯"),
+        ("text", "A"),
+        ("fill", "▣"),
+        ("cut", "✂"),
+        ("copy", "⧉"),
+        ("paste", "📋"),
+        ("search", "🔍"),
+        ("settings", "⚙"),
+        ("play", "▶"),
+        ("stop", "⏹"),
+        ("refresh", "⟳"),
+        ("check", "✓"),
+        ("close", "✕"),
+        ("up", "↑"),
+        ("down", "↓"),
+        ("left", "←"),
+        ("right", "→"),
+        ("home", "⌂"),
+        ("star", "★"),
+        ("heart", "♥"),
+        ("info", "ℹ"),
+        ("warn", "⚠"),
+        ("file", "🗎"),
+        ("folder", "🗀"),
+        ("print", "🖶"),
+        ("zoom-in", "＋"),
+        ("zoom-out", "－"),
+    ];
+    ICONS
+        .iter()
+        .find(|(key, _)| *key == name)
+        .map(|(_, glyph)| *glyph)
+}
+
+/// Таблица клавиш: имена из модели → egui::Key.
+fn key_table() -> String {
+    let mut out = String::new();
+    for ch in 'a'..='z' {
+        out.push_str(&format!(
+            "        (\"{ch}\", egui::Key::{}),\n",
+            ch.to_ascii_uppercase()
+        ));
     }
-    for (op, _) in [("+=", 0), ("-=", 0)] {
-        if let Some((left, right)) = text.split_once(op) {
-            let name = left.trim();
-            let Some(ty) = field_type(screen, name) else {
-                return Err(format!("нет поля «{name}»"));
-            };
-            let value = right.trim();
-            match ty {
-                FieldType::Int | FieldType::Float => {
-                    value
-                        .parse::<f64>()
-                        .map_err(|_| format!("«{value}» не число"))?;
-                    return Ok(format!("state.{name} {op} {value};"));
-                }
-                _ => {
-                    return Err(format!(
-                        "{op} работает только с числами, а {name} — {}",
-                        ty.as_str()
-                    ))
-                }
-            }
+    for digit in 0..=9 {
+        out.push_str(&format!("        (\"{digit}\", egui::Key::Num{digit}),\n"));
+    }
+    let named = [
+        ("escape", "Escape"),
+        ("esc", "Escape"),
+        ("enter", "Enter"),
+        ("return", "Enter"),
+        ("space", "Space"),
+        ("tab", "Tab"),
+        ("backspace", "Backspace"),
+        ("delete", "Delete"),
+        ("del", "Delete"),
+        ("home", "Home"),
+        ("end", "End"),
+        ("insert", "Insert"),
+        ("page-up", "PageUp"),
+        ("page-down", "PageDown"),
+        ("up", "ArrowUp"),
+        ("down", "ArrowDown"),
+        ("left", "ArrowLeft"),
+        ("right", "ArrowRight"),
+        ("plus", "Plus"),
+        ("minus", "Minus"),
+        ("equal", "Equals"),
+        ("comma", "Comma"),
+        ("period", "Period"),
+        ("slash", "Slash"),
+        ("f1", "F1"),
+        ("f2", "F2"),
+        ("f3", "F3"),
+        ("f4", "F4"),
+        ("f5", "F5"),
+        ("f6", "F6"),
+        ("f7", "F7"),
+        ("f8", "F8"),
+        ("f9", "F9"),
+        ("f10", "F10"),
+        ("f11", "F11"),
+        ("f12", "F12"),
+    ];
+    for (name, key) in named {
+        out.push_str(&format!("        (\"{name}\", egui::Key::{key}),\n"));
+    }
+    out
+}
+
+fn shortcut_helpers() -> String {
+    format!(
+        r#"
+/// Горячая клавиша из модели: "Ctrl+S", "F2", "Ctrl+Shift+Z".
+fn shortcut(ui: &egui::Ui, spec: &str) -> bool {{
+    let mut ctrl = false;
+    let mut shift = false;
+    let mut alt = false;
+    let mut key = String::new();
+    for part in spec.split('+') {{
+        match part.trim().to_ascii_lowercase().as_str() {{
+            "ctrl" | "control" | "cmd" | "command" => ctrl = true,
+            "shift" => shift = true,
+            "alt" | "option" => alt = true,
+            other => key = other.to_string(),
+        }}
+    }}
+    let Some(key) = key_from_name(&key) else {{
+        return false;
+    }};
+    ui.input(|i| {{
+        i.key_pressed(key)
+            && i.modifiers.ctrl == ctrl
+            && i.modifiers.shift == shift
+            && i.modifiers.alt == alt
+    }})
+}}
+
+fn key_from_name(name: &str) -> Option<egui::Key> {{
+    const KEYS: &[(&str, egui::Key)] = &[
+{}
+    ];
+    KEYS
+        .iter()
+        .find(|(label, _)| *label == name)
+        .map(|(_, key)| *key)
+}}
+"#,
+        key_table()
+    )
+}
+
+fn styled_text(text_code: &str, widget: &Widget) -> String {
+    let text_code = match widget.style.icon.as_deref().and_then(icon_glyph) {
+        Some(glyph) => format!(
+            "format!(\"{} {{}}\", {text_code})",
+            glyph.replace('{', "{{").replace('}', "}}")
+        ),
+        None => text_code.to_string(),
+    };
+    let mut builder = format!("egui::RichText::new({text_code})");
+    if let Some(size) = widget.style.size {
+        builder.push_str(&format!(".size({})", float_lit(size)));
+    }
+    if widget.style.bold {
+        builder.push_str(".strong()");
+    }
+    if let Some(color) = &widget.style.color {
+        if let Some(code) = color_code(color) {
+            builder.push_str(&format!(".color({code})"));
         }
     }
-    if let Some((left, right)) = text.split_once('=') {
-        let name = left.trim();
-        let Some(ty) = field_type(screen, name) else {
-            return Err(format!("нет поля «{name}»"));
-        };
-        let value = right.trim();
-        return Ok(match ty {
-            FieldType::Bool => match value {
-                "!" => format!("state.{name} = !state.{name};"),
-                other if other == format!("!{name}") => format!("state.{name} = !state.{name};"),
-                "true" => format!("state.{name} = true;"),
-                "false" => format!("state.{name} = false;"),
-                other => return Err(format!("для bool ожидалось !/true/false, а не «{other}»")),
-            },
-            FieldType::Str => {
-                let trimmed = value.trim_matches('"');
-                format!("state.{name} = {}.to_string();", rust_string(trimmed))
-            }
-            FieldType::Int | FieldType::Float => {
-                value
-                    .parse::<f64>()
-                    .map_err(|_| format!("«{value}» не число"))?;
-                format!("state.{name} = {value};")
-            }
-        });
+    builder
+}
+
+fn with_align(body: &str, align: &Option<Align>, pad: &str) -> String {
+    match align {
+        Some(Align::Right) => format!(
+            "{pad}ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {{\n{body}{pad}}});\n"
+        ),
+        Some(Align::Center) => format!(
+            "{pad}ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {{\n{body}{pad}}});\n"
+        ),
+        _ => body.to_string(),
     }
-    Err(format!(
-        "действие «{text}» не разобрано: ожидалось «поле += N», «поле = !поле» или «поле = \"текст\"»"
-    ))
+}
+
+fn reindent(code: &str, levels: usize) -> String {
+    let pad = "    ".repeat(levels);
+    code.lines()
+        .map(|line| {
+            if line.trim().is_empty() {
+                String::from("\n")
+            } else {
+                format!("{pad}{line}\n")
+            }
+        })
+        .collect()
+}
+
+/// Состояние генерации: уникальные id, обработчики как отдельные функции.
+#[derive(Default)]
+struct Emit {
+    counter: usize,
+    /// (имя кнопки, код действия) в порядке появления
+    actions: Vec<(String, String)>,
+}
+
+impl Emit {
+    fn action(&mut self, name: &str, code: String) -> String {
+        let index = self.actions.len();
+        self.actions.push((name.to_string(), code));
+        format!("action_{index}")
+    }
 }
 
 fn emit_widgets(
     widgets: &[Widget],
     screen: &Screen,
     depth: usize,
-    out: &mut String,
-) -> Result<(), String> {
+    emit: &mut Emit,
+) -> Result<String, String> {
     let pad = "    ".repeat(depth);
+    let mut out = String::new();
     for widget in widgets {
-        match widget.kind {
-            WidgetKind::Label => {
-                out.push_str(&format!(
-                    "{pad}ui.label({});\n",
-                    text_expr(&widget.text, screen)
-                ));
-            }
-            WidgetKind::Button => {
-                let action = match &widget.effect {
-                    Some(effect) => effect_code(screen, effect)?,
-                    None => String::new(),
-                };
-                if action.is_empty() {
-                    out.push_str(&format!("{pad}ui.button({});\n", rust_string(&widget.text)));
-                } else {
+        let code = emit_widget(widget, screen, depth, emit)?;
+        if let (Some(width), Some(height)) = (widget.style.width, widget.style.height) {
+            out.push_str(&format!(
+                "{pad}ui.allocate_ui_with_layout(egui::vec2({}, {}), egui::Layout::top_down(egui::Align::Min), |ui| {{\n",
+                float_lit(width),
+                float_lit(height)
+            ));
+            out.push_str(&reindent(&code, 1));
+            out.push_str(&format!("{pad}}});\n"));
+        } else if let Some(width) = widget.style.width {
+            out.push_str(&format!("{pad}ui.set_width({});\n", float_lit(width)));
+            out.push_str(&code);
+        } else {
+            out.push_str(&code);
+        }
+    }
+    Ok(out)
+}
+
+fn emit_widget(
+    widget: &Widget,
+    screen: &Screen,
+    depth: usize,
+    emit: &mut Emit,
+) -> Result<String, String> {
+    let pad = "    ".repeat(depth);
+    let mut out = String::new();
+    match &widget.kind {
+        WidgetKind::Label => {
+            let text = styled_text(&text_expr(&widget.text, screen), widget);
+            out.push_str(&format!("{pad}ui.label({text});\n"));
+        }
+        WidgetKind::Button => {
+            let text = styled_text(&text_expr(&widget.text, screen), widget);
+            if let Some(effect) = &widget.effect {
+                let code = expr::compile(screen, effect)
+                    .map_err(|err| format!("{}: {}", err.message, err.hint))?;
+                let action = emit.action(&widget.text, code);
+                if let Some(key) = &widget.style.key {
                     out.push_str(&format!(
-                        "{pad}if ui.button({}).clicked() {{\n{pad}    {action}\n{pad}}}\n",
-                        rust_string(&widget.text)
+                        "{pad}if shortcut(ui, {}) {{\n{pad}    {action}(state);\n{pad}}}\n",
+                        rust_string(key)
                     ));
                 }
-            }
-            WidgetKind::Checkbox => {
-                let field = widget
-                    .bind
-                    .clone()
-                    .ok_or_else(|| "checkbox без привязки: укажите «-> поле»".to_string())?;
-                let ty = field_type(screen, &field).ok_or_else(|| format!("нет поля «{field}»"))?;
-                if ty != FieldType::Bool {
-                    return Err(format!("checkbox привязан к {field}: нужен bool"));
-                }
                 out.push_str(&format!(
-                    "{pad}ui.checkbox(&mut state.{field}, {});\n",
-                    rust_string(&widget.text)
+                    "{pad}if ui.button({text}).clicked() {{\n{pad}    {action}(state);\n{pad}}}\n"
                 ));
-            }
-            WidgetKind::TextInput => {
-                let field = widget
-                    .bind
-                    .clone()
-                    .ok_or_else(|| "text_input без привязки: укажите «-> поле»".to_string())?;
-                let ty = field_type(screen, &field).ok_or_else(|| format!("нет поля «{field}»"))?;
-                if ty != FieldType::Str {
-                    return Err(format!("text_input привязан к {field}: нужна string"));
+            } else {
+                if let Some(key) = &widget.style.key {
+                    // клавиша без действия: только подсказка в подписи
+                    out.push_str(&format!(
+                        "{pad}ui.button({text}).on_hover_text({});\n",
+                        rust_string(key)
+                    ));
+                } else {
+                    out.push_str(&format!("{pad}ui.button({text});\n"));
                 }
+            }
+        }
+        WidgetKind::Checkbox => {
+            let field = widget
+                .bind
+                .clone()
+                .ok_or_else(|| "checkbox без привязки: укажите «-> поле»".to_string())?;
+            let ty = field_type(screen, &field).ok_or_else(|| format!("нет поля «{field}»"))?;
+            if ty != FieldType::Bool {
+                return Err(format!("checkbox привязан к {field}: нужен bool"));
+            }
+            let text = styled_text(&text_expr(&widget.text, screen), widget);
+            out.push_str(&format!("{pad}ui.checkbox(&mut state.{field}, {text});\n"));
+        }
+        WidgetKind::TextInput => {
+            let field = widget
+                .bind
+                .clone()
+                .ok_or_else(|| "text_input без привязки: укажите «-> поле»".to_string())?;
+            let ty = field_type(screen, &field).ok_or_else(|| format!("нет поля «{field}»"))?;
+            if ty != FieldType::Str {
+                return Err(format!("text_input привязан к {field}: нужна string"));
+            }
+            if widget.style.grow {
+                out.push_str(&format!(
+                    "{pad}ui.add_sized(\n{pad}    [ui.available_width(), 0.0],\n{pad}    egui::TextEdit::singleline(&mut state.{field}),\n{pad});\n"
+                ));
+            } else {
                 out.push_str(&format!(
                     "{pad}ui.text_edit_singleline(&mut state.{field});\n"
                 ));
             }
-            WidgetKind::Slider => {
-                let field = widget
-                    .bind
-                    .clone()
-                    .ok_or_else(|| "slider без привязки: укажите «-> поле»".to_string())?;
-                let ty = field_type(screen, &field).ok_or_else(|| format!("нет поля «{field}»"))?;
-                let (a, b) = widget.range.unwrap_or((0.0, 100.0));
-                let label = if widget.text.is_empty() {
-                    String::new()
-                } else {
-                    format!(".text({})", rust_string(&widget.text))
-                };
-                let range = match ty {
-                    FieldType::Int => format!("{}..={}", a as i64, b as i64),
-                    _ => format!("{a}..={b}"),
-                };
+        }
+        WidgetKind::Slider => {
+            let field = widget
+                .bind
+                .clone()
+                .ok_or_else(|| "slider без привязки: укажите «-> поле»".to_string())?;
+            let ty = field_type(screen, &field).ok_or_else(|| format!("нет поля «{field}»"))?;
+            let (a, b) = widget.range.unwrap_or((0.0, 100.0));
+            let label = if widget.text.is_empty() {
+                String::new()
+            } else {
+                format!(".text({})", rust_string(&widget.text))
+            };
+            let range = match ty {
+                FieldType::Int => format!("{}..={}", a as i64, b as i64),
+                _ => format!("{}..={}", float_lit(a as f32), float_lit(b as f32)),
+            };
+            out.push_str(&format!(
+                "{pad}ui.add(egui::Slider::new(&mut state.{field}, {range}){label});\n"
+            ));
+        }
+        WidgetKind::Separator => out.push_str(&format!("{pad}ui.separator();\n")),
+        WidgetKind::Space => {
+            let height = widget.number.unwrap_or(8.0);
+            out.push_str(&format!("{pad}ui.add_space({});\n", float_lit(height)));
+        }
+        WidgetKind::Vbox => {
+            let body = emit_widgets(&widget.children, screen, depth + 1, emit)?;
+            let aligned = if widget.style.align.is_some() {
+                with_align(&body, &widget.style.align, &"    ".repeat(depth + 1))
+            } else {
+                body.clone()
+            };
+            if let Some(pad_px) = widget.style.pad {
                 out.push_str(&format!(
-                    "{pad}ui.add(egui::Slider::new(&mut state.{field}, {range}){label});\n"
+                    "{pad}egui::Frame::new().inner_margin({pad_px}).show(ui, |ui| {{\n{aligned}{pad}}});\n"
                 ));
-            }
-            WidgetKind::Separator => out.push_str(&format!("{pad}ui.separator();\n")),
-            WidgetKind::Vbox => {
-                out.push_str(&format!("{pad}ui.vertical(|ui| {{\n"));
-                emit_widgets(&widget.children, screen, depth + 1, out)?;
-                out.push_str(&format!("{pad}}});\n"));
-            }
-            WidgetKind::Hbox => {
-                out.push_str(&format!("{pad}ui.horizontal(|ui| {{\n"));
-                emit_widgets(&widget.children, screen, depth + 1, out)?;
-                out.push_str(&format!("{pad}}});\n"));
+            } else if widget.style.align.is_some() {
+                out.push_str(&with_align(&body, &widget.style.align, &pad));
+            } else {
+                out.push_str(&format!("{pad}ui.vertical(|ui| {{\n{body}{pad}}});\n"));
             }
         }
+        WidgetKind::Hbox => {
+            let body = emit_widgets(&widget.children, screen, depth + 1, emit)?;
+            out.push_str(&format!("{pad}ui.horizontal(|ui| {{\n{body}{pad}}});\n"));
+        }
+        WidgetKind::Grid => {
+            let columns = (widget.number.unwrap_or(2.0) as usize).max(1);
+            let id = emit.counter;
+            emit.counter += 1;
+            out.push_str(&format!(
+                "{pad}egui::Grid::new(\"grid-{id}\").num_columns({columns}).spacing([8.0, 6.0]).show(ui, |ui| {{\n"
+            ));
+            let cell_pad = "    ".repeat(depth + 1);
+            for (index, child) in widget.children.iter().enumerate() {
+                let cell = emit_widget(child, screen, depth + 1, emit)?;
+                out.push_str(&cell);
+                if (index + 1) % columns == 0 {
+                    out.push_str(&format!("{cell_pad}ui.end_row();\n"));
+                }
+            }
+            if widget.children.len() % columns != 0 {
+                out.push_str(&format!("{cell_pad}ui.end_row();\n"));
+            }
+            out.push_str(&format!("{pad}}});\n"));
+        }
+        WidgetKind::Scroll => {
+            let body = emit_widgets(&widget.children, screen, depth + 1, emit)?;
+            out.push_str(&format!(
+                "{pad}egui::ScrollArea::vertical().show(ui, |ui| {{\n{body}{pad}}});\n"
+            ));
+        }
+        WidgetKind::Custom(name) => {
+            out.push_str(&format!("{pad}widget_{name}(state, ui);\n"));
+        }
     }
-    Ok(())
+    Ok(out)
 }
 
 fn default_expr(ty: &FieldType, value: &str) -> String {
@@ -281,13 +570,17 @@ fn default_expr(ty: &FieldType, value: &str) -> String {
             _ => "false".to_string(),
         },
         FieldType::Int => value.parse::<i64>().unwrap_or(0).to_string(),
-        FieldType::Float => value.parse::<f64>().unwrap_or(0.0).to_string(),
+        FieldType::Float => float_lit(value.parse::<f32>().unwrap_or(0.0)),
     }
 }
 
 pub fn main_rs(screen: &Screen, _bin_name: &str) -> Result<String, String> {
     let mut state_fields = String::new();
     let mut defaults = String::new();
+    for field in &screen.rust_fields {
+        state_fields.push_str(&format!("    pub {}: {},\n", field.name, field.ty));
+        defaults.push_str(&format!("            {}: {},\n", field.name, field.default));
+    }
     for field in &screen.fields {
         state_fields.push_str(&format!("    pub {}: {},\n", field.name, field.ty.rust()));
         defaults.push_str(&format!(
@@ -296,28 +589,89 @@ pub fn main_rs(screen: &Screen, _bin_name: &str) -> Result<String, String> {
             default_expr(&field.ty, &field.value)
         ));
     }
-    let mut body = String::new();
-    emit_widgets(&screen.root, screen, 1, &mut body)?;
+    let mut emit = Emit::default();
+    let body = emit_widgets(&screen.root, screen, 1, &mut emit)?;
+    let actions_code: String = emit
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(index, (name, code))| {
+            let body = reindent(code, 1);
+            format!(
+                "#[allow(unused_variables, unused_mut)]\n/// {}: действие кнопки, собрано из модели.\nfn action_{index}(state: &mut State) {{\n{body}}}\n\n",
+                name.replace('\n', " ")
+            )
+        })
+        .collect();
+    let actions_table: String = emit
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(index, (name, _))| format!("        ({}, action_{index}),\n", rust_string(name)))
+        .collect();
+    let actions_count = emit.actions.len();
+
+    let init_code: String = screen
+        .rust
+        .iter()
+        .filter(|block| block.kind == RustKind::Init)
+        .map(|block| block.code.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let init_block = if init_code.trim().is_empty() {
+        String::new()
+    } else {
+        format!("        // rust init\n{init_code}\n")
+    };
+
+    let fns: String = screen
+        .rust
+        .iter()
+        .filter(|block| block.kind == RustKind::Fn)
+        .map(|block| format!("{}\n\n", block.code))
+        .collect();
+
+    let widgets: String = screen
+        .rust
+        .iter()
+        .filter(|block| block.kind == RustKind::Widget)
+        .map(|block| {
+            format!(
+                "#[allow(unused_variables, unused_mut)]\nfn widget_{name}(state: &mut State, ui: &mut egui::Ui) {{\n{code}\n}}\n\n",
+                name = block.name,
+                code = block.code
+            )
+        })
+        .collect();
 
     Ok(format!(
-        r#"//! Сгенерировано lazr из form.lazr. Правьте модель, а не этот файл:
-//! `lazr add`, `lazr gen` — и код пересоберётся.
+        r#"//! Сгенерировано lazr из form.lazr. Правьте модель, а не этот файл.
 #![allow(clippy::all)]
 
 use eframe::egui;
+use eframe::egui::NumExt;
+{helpers}
 
-#[derive(Default)]
+#[derive(Clone)]
 pub struct State {{
 {state_fields}}}
 
-impl State {{
-    pub fn new() -> State {{
+impl Default for State {{
+    fn default() -> State {{
         State {{
 {defaults}        }}
     }}
 }}
 
-pub fn draw(state: &mut State, ui: &mut egui::Ui) {{
+impl State {{
+    #[allow(unused_mut)]
+    pub fn new() -> State {{
+        let mut state = State::default();
+{init_block}        state
+    }}
+}}
+
+{fns}{widgets}{actions_code}pub fn draw(state: &mut State, ui: &mut egui::Ui) {{
 {body}}}
 
 struct App {{
@@ -325,23 +679,30 @@ struct App {{
 }}
 
 impl eframe::App for App {{
-    // egui 0.37: корневой Ui приходит готовым, панель не нужна.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {{
         draw(&mut self.state, ui);
     }}
 }}
 
 fn main() {{
-    // --headless: один кадр без окна. Так ИИ проверяет, что интерфейс исполняется,
-    // не открывая ничего на экране.
+    if std::env::args().any(|arg| arg == "--selftest") {{
+        let actions: [(&str, fn(&mut State)); {actions_count}] = [
+{actions_table}        ];
+        let mut state = State::new();
+        for (name, action) in actions {{
+            action(&mut state);
+            println!("  действие «{{name}}»: ok");
+        }}
+        println!("selftest ok: {{}} действий", actions.len());
+        return;
+    }}
     if std::env::args().any(|arg| arg == "--headless") {{
         let ctx = egui::Context::default();
         let mut state = State::new();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {{
             draw(&mut state, ui);
         }});
-        // Кадр не рисуется на экране: дельты текстур нужно погасить, иначе epaint
-        // паникует при выбрасывании необработанных дельт.
+        // Кадр не рисуется: дельты текстур нужно погасить, иначе epaint паникует.
         output.textures_delta.clear();
         println!(
             "headless ok: {{}} фигур, {{}} виджетов в модели",
@@ -364,6 +725,10 @@ fn main() {{
 }}
 "#,
         count = count_widgets(&screen.root),
+        helpers = shortcut_helpers(),
+        actions_code = actions_code,
+        actions_table = actions_table,
+        actions_count = actions_count,
         width = screen.width,
         height = screen.height,
         title = rust_string(&screen.title),
@@ -375,10 +740,6 @@ pub fn count_widgets(widgets: &[Widget]) -> usize {
         .iter()
         .map(|widget| 1 + count_widgets(&widget.children))
         .sum()
-}
-
-pub fn bin_name(screen: &Screen) -> String {
-    crate_name(&screen.title)
 }
 
 #[cfg(test)]
@@ -393,62 +754,81 @@ window "Счётчик" 420x260
 state count int 0
 state name string ""
 state agree bool false
-label "Нажатий: {count}"
+label "Нажатий: {count}" {size:22, bold, color:#e5484d}
 button "Плюс" do count += 1
 checkbox "Согласен" -> agree
-text_input "Имя" -> name
 "#,
         )
-        .unwrap()
+        .unwrap_or_else(|errors| {
+            let text: Vec<String> = errors.iter().map(|e| e.to_json()).collect();
+            panic!("модель не разобралась: {}", text.join(", "));
+        })
     }
 
     #[test]
-    fn generated_code_has_state_ui_and_headless_mode() {
+    fn styles_become_richtext() {
+        let screen =
+            parse("state count int 0\nlabel \"x\" {size:22, bold, color:#e5484d}\n").unwrap();
+        let code = main_rs(&screen, "app").unwrap();
+        assert!(code.contains("egui::RichText::new"), "{code}");
+        assert!(code.contains(".size(22.0)"), "{code}");
+        assert!(code.contains(".strong()"), "{code}");
+        assert!(code.contains("Color32::from_rgb(229, 72, 77)"), "{code}");
+    }
+
+    #[test]
+    fn grid_and_scroll_and_space_are_emitted() {
+        let screen = parse(
+            "state count int 0\ngrid 2\n  label \"a\"\n  label \"b\"\n  label \"c\"\nscroll\n  space 12\n",
+        )
+        .unwrap();
+        let code = main_rs(&screen, "app").unwrap();
+        assert!(
+            code.contains("egui::Grid::new(\"grid-0\").num_columns(2)"),
+            "{code}"
+        );
+        assert!(code.contains("ui.end_row();"), "{code}");
+        assert!(code.contains("egui::ScrollArea::vertical()"), "{code}");
+        assert!(code.contains("ui.add_space(12.0);"), "{code}");
+    }
+
+    #[test]
+    fn effects_compile_into_the_button_handler() {
         let screen = sample();
         let code = main_rs(&screen, "app").unwrap();
-        assert!(code.contains("pub count: i64"));
-        assert!(code.contains("pub name: String"));
-        assert!(code.contains("ui.label(format!(\"Нажатий: {}\", state.count))"));
-        assert!(code.contains("if ui.button(\"Плюс\").clicked()"));
-        assert!(code.contains("state.count += 1;"));
-        assert!(code.contains("ui.checkbox(&mut state.agree"));
-        assert!(code.contains("text_edit_singleline(&mut state.name)"));
-        assert!(code.contains("--headless"));
-        assert!(code.contains("0.37.0") || true);
+        assert!(code.contains("state.count += 1;"), "{code}");
+    }
+
+    #[test]
+    fn rust_blocks_are_emitted_as_functions_and_init() {
+        let screen = parse(
+            "state count int 0\nrust init {\n  state.count = 42;\n}\nrust widget badge {\n  ui.label(\"x\");\n}\ncustom badge\n",
+        )
+        .unwrap();
+        let code = main_rs(&screen, "app").unwrap();
+        assert!(
+            code.contains("fn widget_badge(state: &mut State, ui: &mut egui::Ui)"),
+            "{code}"
+        );
+        assert!(
+            code.contains("state.count = 42;"),
+            "init в конструкторе: {code}"
+        );
+        assert!(code.contains("widget_badge(state, ui);"), "{code}");
     }
 
     #[test]
     fn generation_is_deterministic() {
         let a = main_rs(&sample(), "app").unwrap();
         let b = main_rs(&sample(), "app").unwrap();
-        assert_eq!(a, b, "одна модель — один и тот же код");
+        assert_eq!(a, b);
     }
 
     #[test]
-    fn effects_are_translated_or_refused() {
-        let screen = sample();
-        assert_eq!(
-            effect_code(&screen, "count += 1").unwrap(),
-            "state.count += 1;"
-        );
-        assert_eq!(
-            effect_code(&screen, "agree = !agree").unwrap(),
-            "state.agree = !state.agree;"
-        );
-        assert_eq!(
-            effect_code(&screen, "name = \"Аня\"").unwrap(),
-            "state.name = \"Аня\".to_string();"
-        );
-        assert!(effect_code(&screen, "count += nope").is_err());
-        assert!(effect_code(&screen, "missing += 1").is_err());
-        assert!(effect_code(&screen, "count = !count").is_err());
-    }
-
-    #[test]
-    fn wrong_binding_type_is_caught_before_compiling() {
-        let screen = parse("state count int 0\ntext_input \"x\" -> count\n").unwrap();
-        let err = main_rs(&screen, "app").unwrap_err();
-        assert!(err.contains("string"), "{err}");
+    fn wide_text_input_grows() {
+        let screen = parse("state name string \"\"\ntext_input \"Имя\" -> name {grow}\n").unwrap();
+        let code = main_rs(&screen, "app").unwrap();
+        assert!(code.contains("add_sized"), "{code}");
     }
 
     #[test]

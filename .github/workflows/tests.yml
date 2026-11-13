@@ -23,4 +23,19 @@ jobs:
           cargo run -q -- add /tmp/ci-app button "Плюс" --do "count += 1"
           cargo run -q -- show /tmp/ci-app
           test -f /tmp/ci-app/app/src/main.rs
-          grep -q 'state.count += 1;' /tmp/ci-app/app/src/main.rs
+          grep -q 'fn action_0' /tmp/ci-app/app/src/main.rs
+          grep -q 'action_0(state);' /tmp/ci-app/app/src/main.rs
+      - name: иконки и горячие клавиши в коде
+        run: |
+          cargo run -q -- add /tmp/ci-app button "Сохранить" --do "count = 0" --style "icon:save, key:ctrl+s"
+          grep -q 'fn shortcut' /tmp/ci-app/app/src/main.rs
+          grep -q 'if shortcut(ui, "ctrl+s")' /tmp/ci-app/app/src/main.rs
+          grep -q '💾' /tmp/ci-app/app/src/main.rs
+      - name: S-выражения и пример Paint разбираются
+        run: |
+          cargo run -q -- lisp examples/paint.lisp > /tmp/paint.lazr
+          grep -q 'rust field strokes' /tmp/paint.lazr
+          grep -q 'custom canvas' /tmp/paint.lazr
+          cargo run -q -- lisp examples/paint.lisp --to /tmp/paint-ci
+          grep -q 'fn widget_canvas' /tmp/paint-ci/app/src/main.rs
+          grep -q 'fn shortcut' /tmp/paint-ci/app/src/main.rs

@@ -15,6 +15,8 @@
 //! ```
 
 mod codegen;
+mod expr;
+mod lang;
 mod mcp;
 mod model;
 mod project;
@@ -80,7 +82,9 @@ fn main() {
         Some("show") => cmd_show(&args[1..]),
         Some("gen") => cmd_gen(&args[1..]),
         Some("build") => cmd_build(&args[1..]),
+        Some("verify") => cmd_verify(&args[1..]),
         Some("headless") => cmd_headless(&args[1..]),
+        Some("lisp") => cmd_lisp(&args[1..]),
         Some("mcp") => mcp::serve(),
         Some("demo") => cmd_demo(),
         Some("--help") | Some("-h") | None => {
@@ -107,6 +111,7 @@ fn print_help() {
   gen DIR                             перегенерировать app/
   build DIR                           cargo build --offline в app/
   headless DIR                        исполнить интерфейс один кадр без окна
+  lisp FILE [--to DIR]                S-выражения → модель (и проект, если --to)
   mcp                                 MCP-сервер на stdin/stdout
   demo                                сквозная проверка на живом примере
 
@@ -204,19 +209,42 @@ fn cmd_add(args: &[String]) -> i32 {
         eprintln!("нужно: add DIR KIND [TEXT]");
         return 2;
     };
-    let Some(kind) = WidgetKind::parse(kind_text) else {
-        eprintln!(
-            "виджет неизвестен; доступны: {}",
-            WidgetKind::all().join(", ")
-        );
-        return 2;
+    let kind = if kind_text == "custom" {
+        match positional.get(2) {
+            Some(name) => WidgetKind::Custom(name.clone()),
+            None => {
+                eprintln!("нужно: add DIR custom ИМЯ (виджет объявлен в rust widget ИМЯ)");
+                return 2;
+            }
+        }
+    } else {
+        match WidgetKind::parse_kind(kind_text) {
+            Some(kind) => kind,
+            None => {
+                eprintln!(
+                    "виджет неизвестен; доступны: {}",
+                    WidgetKind::all().join(", ")
+                );
+                return 2;
+            }
+        }
     };
-    let text = positional.get(2).cloned().unwrap_or_default();
+    let text = if matches!(kind, WidgetKind::Custom(_)) {
+        String::new()
+    } else {
+        positional.get(2).cloned().unwrap_or_default()
+    };
     let bind = opts.flag("bind");
     let effect = opts.flag("do");
     let container = opts.flag("container");
+    let number = opts
+        .flag("number")
+        .and_then(|value| value.parse::<f32>().ok());
+    let style = opts
+        .flag("style")
+        .and_then(|text| model::parse_style_text(text).ok());
     let outcome = Project::load(&dir).and_then(|mut project| {
-        project.add_widget(kind.clone(), &text, bind, effect, container)?;
+        project.add_widget_with(kind.clone(), &text, bind, effect, container, number, style)?;
         project.save()?;
         project.generate()?;
         Ok(project)
@@ -295,6 +323,35 @@ fn cmd_build(args: &[String]) -> i32 {
     }
 }
 
+/// Проверка собранной программы: компиляция, кадр без окна, вызов всех действий.
+fn cmd_verify(args: &[String]) -> i32 {
+    let opts = Opts::parse(args);
+    let dir = match dir_of(&opts, 0) {
+        Ok(dir) => dir,
+        Err(code) => return code,
+    };
+    let project = match Project::load(&dir) {
+        Ok(project) => project,
+        Err(err) => {
+            eprintln!("{err}");
+            return 1;
+        }
+    };
+    match project.verify() {
+        Ok(report) => {
+            for line in report {
+                println!("{line}");
+            }
+            println!("итог: проверено");
+            0
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            1
+        }
+    }
+}
+
 fn cmd_headless(args: &[String]) -> i32 {
     let opts = Opts::parse(args);
     let dir = match dir_of(&opts, 0) {
@@ -309,6 +366,71 @@ fn cmd_headless(args: &[String]) -> i32 {
         Err(err) => {
             eprintln!("{err}");
             1
+        }
+    }
+}
+
+/// DSL: S-выражения → модель → проект. Rust остаётся HAL.
+fn cmd_lisp(args: &[String]) -> i32 {
+    let opts = Opts::parse(args);
+    let positional = opts.positional();
+    let source = if let Some(path) = positional.first() {
+        match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(err) => {
+                eprintln!("не прочитать {path}: {err}");
+                return 2;
+            }
+        }
+    } else if let Some(inline) = opts.flag("eval") {
+        inline.to_string()
+    } else {
+        eprintln!("нужен файл с S-выражениями или --eval \"(label …)\"");
+        return 2;
+    };
+    let forms = match lang::read(&source) {
+        Ok(forms) => forms,
+        Err(err) => {
+            eprintln!("{}: {}", err.message, err.hint);
+            return 1;
+        }
+    };
+    let evaluated = match lang::eval(&forms) {
+        Ok(evaluated) => evaluated,
+        Err(err) => {
+            eprintln!("{}: {}", err.message, err.hint);
+            return 1;
+        }
+    };
+    let text = model::render(&evaluated.screen);
+    match opts.flag("to") {
+        Some(dir) => {
+            let dir = PathBuf::from(dir);
+            let mut project = match Project::create(
+                &dir,
+                &evaluated.screen.title,
+                evaluated.screen.width,
+                evaluated.screen.height,
+            ) {
+                Ok(project) => project,
+                Err(err) => {
+                    eprintln!("{err}");
+                    return 1;
+                }
+            };
+            project.screen = evaluated.screen;
+            if let Err(err) = project.save().and_then(|()| project.generate()) {
+                eprintln!("{err}");
+                return 1;
+            }
+            println!("проект из DSL: {}", project.dir.display());
+            println!("  модель: {}", project.form_path().display());
+            println!("  код:    {}", project.main_path());
+            0
+        }
+        None => {
+            print!("{text}");
+            0
         }
     }
 }

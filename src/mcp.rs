@@ -166,6 +166,14 @@ fn call_tool(params: &str) -> String {
     let text_arg = |key: &str| json_string_value(&args, key);
 
     let outcome: Result<String, String> = (|| {
+        // form_new создаёт проект: читать форму ещё нечего, поэтому он идёт первым.
+        if name == "form_new" {
+            let title = text_arg("title").unwrap_or_else(|| "Окно".to_string());
+            let (w, h) = parse_size(text_arg("size").as_deref());
+            let fresh = Project::create(&dir, &title, w, h)?;
+            fresh.generate()?;
+            return Ok(format!("{{\"ok\":true,\"dir\":{}}}", model::json_str(&dir)));
+        }
         let mut project = Project::load(&dir)?;
         match name.as_str() {
             "form_show" => Ok(project.screen_text()),
@@ -201,16 +209,9 @@ fn call_tool(params: &str) -> String {
                 project.generate()?;
                 Ok("{\"ok\":true}".to_string())
             }
-            "form_new" => {
-                let title = text_arg("title").unwrap_or_else(|| "Окно".to_string());
-                let (w, h) = parse_size(text_arg("size").as_deref());
-                let fresh = Project::create(&dir, &title, w, h)?;
-                fresh.generate()?;
-                Ok(format!("{{\"ok\":true,\"dir\":{}}}", model::json_str(&dir)))
-            }
             "form_add" => {
                 let kind = text_arg("kind").ok_or("нужно kind")?;
-                let kind = WidgetKind::parse(&kind).ok_or_else(|| {
+                let kind = WidgetKind::parse_kind(&kind).ok_or_else(|| {
                     format!(
                         "виджет неизвестен; доступны: {}",
                         WidgetKind::all().join(", ")
@@ -359,6 +360,21 @@ mod tests {
         let args = json_raw_value(&request.params, "arguments").unwrap();
         assert_eq!(json_string_value(&args, "dir").as_deref(), Some("/tmp/x"));
         assert_eq!(json_string_value(&args, "text").as_deref(), Some("Привет"));
+    }
+
+    #[test]
+    fn form_new_works_on_an_empty_directory() {
+        let dir = std::env::temp_dir().join(format!("lazr-mcp-new-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let params = format!(
+            r#"{{"name":"form_new","arguments":{{"dir":{},"title":"MCP","size":"320x200"}}}}"#,
+            model::json_str(&dir.display().to_string())
+        );
+        let response = call_tool(&params);
+        assert!(!response.contains("\"isError\":true"), "{response}");
+        assert!(dir.join("form.lazr").exists(), "модель создана");
+        assert!(dir.join("app/src/main.rs").exists(), "код сгенерирован");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

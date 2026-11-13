@@ -40,6 +40,8 @@ impl Project {
             width,
             height,
             fields: Vec::new(),
+            rust: Vec::new(),
+            rust_fields: Vec::new(),
             root: vec![Widget::container(WidgetKind::Vbox)],
         };
         let project = Project { dir, screen };
@@ -113,6 +115,33 @@ impl Project {
         self.target_dir().join("debug").join(bin)
     }
 
+    /// Полная проверка собранной программы: компиляция, кадр без окна, прогон действий.
+    ///
+    /// «Работает» — это три факта, а не один: собралось, нарисовалось, обработчики
+    /// не падают при вызове. Возвращает отчёт строками.
+    pub fn verify(&self) -> Result<Vec<String>, String> {
+        let mut report = Vec::new();
+        self.build()?;
+        report.push("сборка: ок".to_string());
+        report.push(self.headless()?);
+        let binary = self.binary();
+        let out = Command::new(&binary)
+            .arg("--selftest")
+            .output()
+            .map_err(|err| format!("не запустить {}: {err}", binary.display()))?;
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        if !out.status.success() {
+            return Err(format!(
+                "{{\"ok\":false,\"stage\":\"selftest\",\"stdout\":{},\"stderr\":{}}}",
+                model::json_str(&stdout),
+                model::json_str(&stderr)
+            ));
+        }
+        report.push(stdout.trim().to_string());
+        Ok(report)
+    }
+
     /// Один кадр интерфейса без окна: проверка, что UI исполняется, а не только компилируется.
     pub fn headless(&self) -> Result<String, String> {
         let binary = self.binary();
@@ -153,6 +182,20 @@ impl Project {
         effect: Option<&str>,
         container: Option<&str>,
     ) -> Result<(), String> {
+        self.add_widget_with(kind, text, bind, effect, container, None, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_widget_with(
+        &mut self,
+        kind: WidgetKind,
+        text: &str,
+        bind: Option<&str>,
+        effect: Option<&str>,
+        container: Option<&str>,
+        number: Option<f32>,
+        style: Option<crate::model::Style>,
+    ) -> Result<(), String> {
         let mut widget = if kind.is_container() {
             Widget::container(kind)
         } else {
@@ -160,6 +203,10 @@ impl Project {
         };
         widget.bind = bind.map(str::to_string);
         widget.effect = effect.map(str::to_string);
+        widget.number = number;
+        if let Some(style) = style {
+            widget.style = style;
+        }
         // Без явного контейнера кладём в первый vbox/hbox: так ИИ не обязан
         // знать структуру, а виджет попадает туда, где его увидят.
         let default_container = container.map(str::to_string).or_else(|| {
