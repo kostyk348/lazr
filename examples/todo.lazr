@@ -1,0 +1,15 @@
+window "Задачи" 480 560
+theme dark accent:#388bfd font:14 spacing:8 round:8
+state items list
+state draft string
+state done int 0
+label "Задачи" {size:24, bold}
+label "сделано: {done} · в списке: {items}" {size:12, color:#8b949e}
+hbox
+  text-input "что сделать" -> draft {grow}
+  button "Добавить" do append items draft; draft = "" {icon:check, key:ctrl+enter}
+list -> items "пусто — добавьте первую задачу"
+hbox
+  button "Готово" do done += 1 {size:14}
+  button "Сброс" do done = 0
+  button "Очистить" do clear items; done = 0 {icon:delete}

@@ -156,11 +156,17 @@ fn text_expr(text: &str, screen: &Screen) -> String {
                 }
                 name.push(next);
             }
-            if closed && screen.fields.iter().any(|f| f.name == name) {
-                parts.push(current.clone());
-                current.clear();
-                args.push(format!("state.{name}"));
-                continue;
+            if closed {
+                if let Some(field) = screen.fields.iter().find(|f| f.name == name) {
+                    parts.push(current.clone());
+                    current.clear();
+                    // у списка в тексте печатаем количество — иначе в format! уходит Vec
+                    args.push(match field.ty {
+                        FieldType::List => format!("state.{name}.len()"),
+                        _ => format!("state.{name}"),
+                    });
+                    continue;
+                }
             }
             current.push('{');
             current.push_str(&name);
@@ -687,6 +693,32 @@ fn emit_widget(
                 "{pad}ui.advance_cursor_after_rect(canvas_{id});\n"
             ));
         }
+        WidgetKind::List => {
+            // Список строк: подпись + удаление у каждой строки. Клик по «✖» убирает
+            // элемент по индексу, поэтому идём по копии — иначе заимствование спорит.
+            let field = widget
+                .bind
+                .clone()
+                .ok_or_else(|| "у списка нужен привязанный список: list -> items".to_string())?;
+            let Some(found) = screen.fields.iter().find(|f| f.name == field) else {
+                return Err(format!("список «{field}» не объявлен в state"));
+            };
+            if found.ty != FieldType::List {
+                return Err(format!(
+                    "«{field}» имеет тип {}, а list работает только со списком",
+                    found.ty.as_str()
+                ));
+            }
+            let empty_text = if widget.text.is_empty() {
+                "пусто".to_string()
+            } else {
+                widget.text.clone()
+            };
+            out.push_str(&format!(
+                "{pad}if state.{field}.is_empty() {{\n{pad}    ui.label(egui::RichText::new({}).size(12.0).color(egui::Color32::from_gray(130)));\n{pad}}} else {{\n{pad}    let rows = state.{field}.clone();\n{pad}    for (i, item) in rows.iter().enumerate() {{\n{pad}        ui.horizontal(|ui| {{\n{pad}            ui.label(item);\n{pad}            if ui.small_button(\"✖\").clicked() && i < state.{field}.len() {{\n{pad}                state.{field}.remove(i);\n{pad}            }}\n{pad}        }});\n{pad}    }}\n{pad}}}\n",
+                rust_string(&empty_text)
+            ));
+        }
         WidgetKind::Custom(name) => {
             out.push_str(&format!("{pad}widget_{name}(state, ui);\n"));
         }
@@ -709,17 +741,24 @@ fn default_expr(ty: &FieldType, value: &str) -> String {
         },
         FieldType::Int => value.parse::<i64>().unwrap_or(0).to_string(),
         FieldType::Float => float_lit(value.parse::<f32>().unwrap_or(0.0)),
+        // список всегда начинается пустым: начальные элементы задаются действиями
+        FieldType::List => "Vec::new()".to_string(),
     }
 }
 
 pub fn main_rs(screen: &Screen, _bin_name: &str) -> Result<String, String> {
     let mut state_fields = String::new();
     let mut defaults = String::new();
+    let mut snapshot = String::new();
     for field in &screen.rust_fields {
         state_fields.push_str(&format!("    pub {}: {},\n", field.name, field.ty));
         defaults.push_str(&format!("            {}: {},\n", field.name, field.default));
     }
     for field in &screen.fields {
+        snapshot.push_str(&format!(
+            "        (\"{}\", format!(\"{{:?}}\", state.{})),\n",
+            field.name, field.name
+        ));
         state_fields.push_str(&format!("    pub {}: {},\n", field.name, field.ty.rust()));
         defaults.push_str(&format!(
             "            {}: {},\n",
@@ -787,10 +826,17 @@ pub fn main_rs(screen: &Screen, _bin_name: &str) -> Result<String, String> {
 #![allow(clippy::all)]
 
 use eframe::egui;
+#[allow(unused_imports)]
 use eframe::egui::NumExt;
 {helpers}{theme}
+#[derive(Debug, Clone)]
 pub struct State {{
 {state_fields}}}
+
+fn snapshot(state: &State) -> Vec<(&'static str, String)> {{
+    vec![
+{snapshot}    ]
+}}
 
 impl Default for State {{
     fn default() -> State {{
@@ -831,8 +877,21 @@ fn main() {{
 {actions_table}        ];
         let mut state = State::new();
         for (name, action) in actions {{
+            // Проверяем эффект, а не факт вызова: печатаем, что именно изменилось.
+            let before = snapshot(&state);
             action(&mut state);
-            println!("  действие «{{name}}»: ok");
+            let after = snapshot(&state);
+            let mut changes: Vec<String> = Vec::new();
+            for ((field, old), (_, new)) in before.iter().zip(after.iter()) {{
+                if old != new {{
+                    changes.push(format!("{{field}}: {{old}} → {{new}}"));
+                }}
+            }}
+            if changes.is_empty() {{
+                println!("  действие «{{name}}»: без изменений");
+            }} else {{
+                println!("  действие «{{name}}»: {{}}", changes.join(", "));
+            }}
         }}
         println!("selftest ok: {{}} действий", actions.len());
         return;

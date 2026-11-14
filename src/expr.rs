@@ -118,6 +118,8 @@ enum Ty {
     Float,
     Str,
     Bool,
+    /// Список: участвует только в append/remove/clear, в выражениях бесполезен.
+    List,
 }
 
 impl Ty {
@@ -127,6 +129,7 @@ impl Ty {
             FieldType::Float => Ty::Float,
             FieldType::Bool => Ty::Bool,
             FieldType::Str => Ty::Str,
+            FieldType::List => Ty::List,
         }
     }
     fn numeric(&self) -> bool {
@@ -226,6 +229,58 @@ impl<'a> Parser<'a> {
                 }
                 return Ok(code);
             }
+            // операции над списком: append items "текст", remove items 0, clear items
+            if matches!(word.as_str(), "append" | "remove" | "clear") {
+                self.next();
+                let name = match self.next() {
+                    Tok::Ident(name) => name,
+                    _ => {
+                        return Err(ExprError::new(
+                            format!("после {word} нужно имя списка"),
+                            "append items \"молоко\"; remove items 0; clear items",
+                        ))
+                    }
+                };
+                let ty = self.field(&name)?;
+                if ty != Ty::List {
+                    return Err(ExprError::new(
+                        format!("«{name}» — не список, а {}", self.type_name(&name)),
+                        "append/remove/clear работают только с полем типа list",
+                    ));
+                }
+                return match word.as_str() {
+                    "clear" => Ok(format!("{pad}state.{name}.clear();\n")),
+                    "append" => {
+                        let value = self.expression()?;
+                        let code = match value.ty {
+                            // to_string() годится и литералу, и полю: push ждёт String
+                            Ty::Str | Ty::Int | Ty::Float => {
+                                format!("({}).to_string()", value.code)
+                            }
+                            _ => {
+                                return Err(ExprError::new(
+                                    "в список можно класть строки и числа",
+                                    "append items \"молоко\"; append items count",
+                                ))
+                            }
+                        };
+                        Ok(format!("{pad}state.{name}.push({code});\n"))
+                    }
+                    _ => {
+                        let index = self.expression()?;
+                        if index.ty != Ty::Int {
+                            return Err(ExprError::new(
+                                "индекс удаления должен быть целым",
+                                "remove items 0",
+                            ));
+                        }
+                        let idx = index.code;
+                        Ok(format!(
+                            "{pad}if ({idx}) < state.{name}.len() {{\n{pad}    state.{name}.remove({idx});\n{pad}}}\n"
+                        ))
+                    }
+                };
+            }
             // присваивание
             self.next();
             let target_ty = self.field(&word)?;
@@ -264,6 +319,16 @@ impl<'a> Parser<'a> {
             "действие должно начинаться с поля или if",
             "count += 1; if count > 5 { count = 0; }",
         ))
+    }
+
+    /// Имя типа поля для сообщений об ошибках.
+    fn type_name(&self, name: &str) -> &'static str {
+        self.screen
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .map(|field| field.ty.as_str())
+            .unwrap_or("полем")
     }
 
     /// Сравнение: `count > 5`, `name == "Аня"`.

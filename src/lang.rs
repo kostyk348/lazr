@@ -436,7 +436,7 @@ impl Builder {
                 Ok(None)
             }
             "label" | "button" | "checkbox" | "text-input" | "slider" | "space" | "separator"
-            | "vbox" | "hbox" | "grid" | "scroll" | "place" | "custom" => {
+            | "vbox" | "hbox" | "grid" | "scroll" | "place" | "list" | "custom" => {
                 self.node(&head, args)
             }
             other => Err(LispError::new(
@@ -460,6 +460,7 @@ impl Builder {
             "grid" => WidgetKind::Grid,
             "scroll" => WidgetKind::Scroll,
             "place" => WidgetKind::Place,
+            "list" => WidgetKind::List,
             "custom" => WidgetKind::Custom(
                 args.first()
                     .and_then(Value::text)
@@ -481,8 +482,12 @@ impl Builder {
                 match first {
                     Value::List(_) => {}
                     other => {
-                        widget.text = other.text().unwrap_or_default();
-                        index = 1;
+                        let candidate = other.text().unwrap_or_default();
+                        // «:bind» — ключ, а не текст: у виджета может не быть подписи
+                        if !candidate.starts_with(':') {
+                            widget.text = candidate;
+                            index = 1;
+                        }
                     }
                 }
             }
@@ -742,6 +747,23 @@ fn handler(form: &Value) -> Result<String, LispError> {
             }
             Ok(format!("{name} = {}", expr_text(value)?))
         }
+        Some("append") | Some("remove") | Some("clear") => {
+            let word = items[0].text().unwrap_or_default();
+            let name = items
+                .get(1)
+                .and_then(Value::text)
+                .ok_or_else(|| LispError::new(format!("({word} список …)"), "имя списка"))?;
+            match word.as_str() {
+                "clear" => Ok(format!("clear {name}")),
+                _ => {
+                    let value = items.get(2).ok_or_else(|| {
+                        LispError::new(format!("({word} список значение)"), "что положить")
+                    })?;
+                    // remove ждёт индекс, append — значение
+                    Ok(format!("{word} {name} {}", expr_text(value)?))
+                }
+            }
+        }
         Some("if") => {
             let cond = items
                 .get(1)
@@ -759,7 +781,7 @@ fn handler(form: &Value) -> Result<String, LispError> {
         }
         other => Err(LispError::new(
             format!("обработчик «{other:?}» неизвестен"),
-            "do, set!, if",
+            "do, set!, if, append, remove, clear",
         )),
     }
 }
@@ -893,5 +915,18 @@ mod tests {
             screen.root[0].effect.as_deref(),
             Some("count += 1; count = 0")
         );
+    }
+
+    #[test]
+    fn list_forms_become_actions() {
+        let forms = crate::lang::read(
+            "(window \"Список\" 400 300)\n(state items list)\n(button \"д\" (append items \"молоко\"))\n(button \"о\" (clear items))\n",
+        )
+        .unwrap();
+        let model = crate::lang::eval(&forms).unwrap();
+        let effect = model.screen.root[0].effect.clone().unwrap();
+        assert!(effect.contains("append items"), "{effect}");
+        let clear = model.screen.root[1].effect.clone().unwrap();
+        assert_eq!(clear, "clear items");
     }
 }

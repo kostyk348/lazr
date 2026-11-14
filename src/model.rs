@@ -21,6 +21,8 @@ pub enum FieldType {
     Float,
     Bool,
     Str,
+    /// Список строк: без него не сделать ни списка задач, ни журнала, ни таблицы.
+    List,
 }
 
 impl FieldType {
@@ -30,6 +32,7 @@ impl FieldType {
             FieldType::Float => "float",
             FieldType::Bool => "bool",
             FieldType::Str => "string",
+            FieldType::List => "list",
         }
     }
     pub fn parse(text: &str) -> Option<FieldType> {
@@ -38,6 +41,7 @@ impl FieldType {
             "float" => FieldType::Float,
             "bool" => FieldType::Bool,
             "string" | "str" => FieldType::Str,
+            "list" | "items" => FieldType::List,
             _ => return None,
         })
     }
@@ -47,6 +51,7 @@ impl FieldType {
             FieldType::Float => "f32",
             FieldType::Bool => "bool",
             FieldType::Str => "String",
+            FieldType::List => "Vec<String>",
         }
     }
     #[allow(dead_code)]
@@ -168,6 +173,8 @@ pub enum WidgetKind {
     Scroll,
     /// Абсолютное размещение: место фиксированного размера и точки внутри него.
     Place,
+    /// Список строк: строки с кнопкой удаления, привязан к полю типа list.
+    List,
     Custom(String),
 }
 
@@ -186,6 +193,7 @@ impl WidgetKind {
             WidgetKind::Grid => "grid",
             WidgetKind::Scroll => "scroll",
             WidgetKind::Place => "place",
+            WidgetKind::List => "list",
             WidgetKind::Custom(_) => "custom",
         }
     }
@@ -204,7 +212,7 @@ impl WidgetKind {
             "label" => WidgetKind::Label,
             "button" => WidgetKind::Button,
             "checkbox" => WidgetKind::Checkbox,
-            "text_input" => WidgetKind::TextInput,
+            "text_input" | "text-input" => WidgetKind::TextInput,
             "slider" => WidgetKind::Slider,
             "separator" => WidgetKind::Separator,
             "space" => WidgetKind::Space,
@@ -213,6 +221,7 @@ impl WidgetKind {
             "grid" => WidgetKind::Grid,
             "scroll" => WidgetKind::Scroll,
             "place" => WidgetKind::Place,
+            "list" => WidgetKind::List,
             _ => return None,
         })
     }
@@ -230,6 +239,7 @@ impl WidgetKind {
             "grid",
             "scroll",
             "place",
+            "list",
             "custom",
         ]
     }
@@ -743,7 +753,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                         line: line_no,
                         code: "UNKNOWN_TYPE",
                         message: format!("тип «{}» неизвестен", words[2]),
-                        hint: "int, float, bool, string".into(),
+                        hint: "int, float, bool, string, list".into(),
                     });
                     continue;
                 };
@@ -752,6 +762,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     FieldType::Bool => "false".into(),
                     FieldType::Int => "0".into(),
                     FieldType::Float => "0.0".into(),
+                    FieldType::List => String::new(),
                 });
                 screen.fields.push(Field {
                     name: words[1].clone(),
@@ -861,7 +872,19 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                                 break;
                             }
                         }
-                        widget.effect = Some(rest[i + 1..end].join(" "));
+                        // Строковые литералы возвращаем в кавычки: выражение должно получить
+                        // draft = "молоко", а не draft = молоко (иначе это имя поля).
+                        let effect: Vec<String> = (i + 1..end)
+                            .map(|k| {
+                                let token = rest[k].clone();
+                                if rest_quoted.get(k).copied().unwrap_or(false) {
+                                    format!("\"{}\"", token.replace('"', "\\\""))
+                                } else {
+                                    token
+                                }
+                            })
+                            .collect();
+                        widget.effect = Some(effect.join(" "));
                         i = end;
                         continue;
                     } else if token == "->" {
@@ -1293,5 +1316,39 @@ theme dark accent:#388bfd font:16 spacing:12 round:10
     fn effect_errors_surface_with_hint() {
         let errors = parse("state count int 0\nbutton \"x\" do count += nope\n").unwrap_err();
         assert!(errors.iter().any(|e| e.code == "BAD_EFFECT"));
+    }
+
+    #[test]
+    fn list_state_and_widget_parse() {
+        let screen = parse("state items list\nlist -> items\n").unwrap();
+        assert_eq!(screen.fields[0].ty, FieldType::List);
+        assert_eq!(screen.root[0].kind, WidgetKind::List);
+        assert_eq!(screen.root[0].bind.as_deref(), Some("items"));
+    }
+
+    #[test]
+    fn list_operations_compile() {
+        let screen = parse("state items list\nstate n int 0\n").unwrap();
+        let append = expr::compile(&screen, "append items \"молоко\"; n += 1").unwrap();
+        assert!(append.contains("state.items.push"));
+        let clear = expr::compile(&screen, "clear items").unwrap();
+        assert!(clear.contains("state.items.clear()"));
+        let remove = expr::compile(&screen, "remove items 0").unwrap();
+        assert!(remove.contains(".remove("));
+    }
+
+    #[test]
+    fn list_ops_reject_plain_fields() {
+        let screen = parse("state n int 0\n").unwrap();
+        let err = expr::compile(&screen, "append n 1").unwrap_err();
+        assert!(err.message.contains("не список"), "{}", err.message);
+    }
+
+    #[test]
+    fn quotes_survive_in_effect() {
+        // Строковый литерал в do должен остаться литералом: draft = "" и draft = "ок"
+        let screen = parse("state draft string\nbutton \"x\" do draft = \"ок\"\n").unwrap();
+        let effect = screen.root[0].effect.clone().unwrap();
+        assert!(effect.contains('"'), "кавычки потерялись: {effect}");
     }
 }

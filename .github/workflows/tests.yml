@@ -66,6 +66,17 @@ jobs:
           cargo run -q -- live examples/live-demo.lazr --check | tee /tmp/live-check.txt
           grep -q 'count: 0 → 1' /tmp/live-check.txt
           grep -q 'check ok: действий 3' /tmp/live-check.txt
+      - name: списки работают в сгенерированном приложении
+        run: |
+          cargo run -q -- lisp examples/todo.lisp --to /tmp/ci-todo
+          cargo run -q -- verify /tmp/ci-todo | tee /tmp/ci-todo.txt
+          grep -q 'items: \[\] → ' /tmp/ci-todo.txt
+          grep -q 'items: \[\"\"\] → \[\]' /tmp/ci-todo.txt
+      - name: списки работают и в рантайме
+        run: |
+          cargo run -q -- live examples/todo.lisp --check | tee /tmp/ci-todo-live.txt
+          grep -q 'items: 0 → 1' /tmp/ci-todo-live.txt
+          grep -q 'items: 1 → 0' /tmp/ci-todo-live.txt
       - name: все демки чистые (--problems = 0)
         run: |
           for model in examples/*.lisp examples/*.lazr; do

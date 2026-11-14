@@ -23,6 +23,8 @@ enum Value {
     Float(f32),
     Bool(bool),
     Text(String),
+    /// Список строк: то же, что Vec<String> в сгенерированном коде.
+    List(Vec<String>),
 }
 
 impl Value {
@@ -39,6 +41,8 @@ impl Value {
             Value::Float(v) => format!("{v}"),
             Value::Bool(v) => v.to_string(),
             Value::Text(v) => v.clone(),
+            // в тексте список показывает количество, а не содержимое
+            Value::List(items) => items.len().to_string(),
         }
     }
 }
@@ -147,7 +151,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
     let mut stack: Vec<(usize, Vec<usize>)> = vec![(0, Vec::new())];
     let known = [
         "label", "button", "checkbox", "text_input", "slider", "space", "separator", "vbox", "hbox", "grid",
-        "scroll", "place", "custom",
+        "scroll", "place", "list", "custom",
     ];
     let mut in_rust = false;
     // глубина фигурных скобок внутри блока rust: внутри бывают свои «}»,
@@ -181,6 +185,8 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
         let depth = line.len() - line.trim_start().len();
         let words: Vec<String> = split_tokens(trimmed);
         let Some(head) = words.first().cloned() else { continue };
+        // в DSL дефис (text-input), в отрисовке подчёркивание (text_input)
+        let head = head.replace('-', "_");
         match head.as_str() {
             "window" => {
                 if let Some(title) = words.get(1) {
@@ -205,6 +211,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                         Value::Float(words.get(3).and_then(|v| v.parse().ok()).unwrap_or(0.0))
                     }
                     "bool" => Value::Bool(words.get(3).map(|v| v == "true").unwrap_or(false)),
+                    "list" => Value::List(Vec::new()),
                     _ => Value::Text(words.get(3).map(|v| unquote(v)).unwrap_or_default()),
                 };
                 model.fields.push((name, value));
@@ -500,6 +507,39 @@ fn run_effect(state: &mut HashMap<String, Value>, effect: &str) {
             }
             continue;
         }
+        // append items "текст"; remove items 0; clear items
+        if let Some(rest) = statement.strip_prefix("append ") {
+            let (name, value) = rest.split_once(' ').unwrap_or((rest, ""));
+            let raw = value.trim();
+            let text = if raw.starts_with('"') {
+                unquote(raw)
+            } else {
+                match state.get(raw) {
+                    Some(other) => other.show(),
+                    None => raw.to_string(),
+                }
+            };
+            if let Some(Value::List(items)) = state.get_mut(name.trim()) {
+                items.push(text);
+            }
+            continue;
+        }
+        if let Some(rest) = statement.strip_prefix("remove ") {
+            let (name, index) = rest.split_once(' ').unwrap_or((rest, "0"));
+            let index = eval_expr(state, index.trim()) as usize;
+            if let Some(Value::List(items)) = state.get_mut(name.trim()) {
+                if index < items.len() {
+                    items.remove(index);
+                }
+            }
+            continue;
+        }
+        if let Some(rest) = statement.strip_prefix("clear ") {
+            if let Some(Value::List(items)) = state.get_mut(rest.trim()) {
+                items.clear();
+            }
+            continue;
+        }
         let (name, kind, value) = if let Some((n, v)) = statement.split_once("+=") {
             (n.trim(), "+=", v.trim())
         } else if let Some((n, v)) = statement.split_once("-=") {
@@ -782,6 +822,7 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
                     "bool" => Value::Bool(
                         args.get(2).and_then(Sexp::text).as_deref() == Some("true"),
                     ),
+                    "list" => Value::List(Vec::new()),
                     _ => Value::Text(args.get(2).and_then(Sexp::text).unwrap_or_default()),
                 };
                 model.fields.push((name, value));
@@ -1004,7 +1045,7 @@ fn build_node(
     if !matches!(
         kind.as_str(),
         "label" | "button" | "checkbox" | "text_input" | "slider" | "space" | "separator" | "vbox"
-            | "hbox" | "grid" | "scroll" | "place" | "custom"
+            | "hbox" | "grid" | "scroll" | "place" | "list" | "custom"
     ) {
         return Err(format!("форма «{head}» рантайму неизвестна"));
     }
@@ -1026,6 +1067,8 @@ fn eval_handler(state: &mut HashMap<String, Value>, form: &Sexp) {
             let Some(value) = items.get(2) else { return };
             let current = state.get(&name).cloned().unwrap_or(Value::Int(0));
             let next = match &current {
+                // список меняется только через append/remove/clear
+                Value::List(_) => current.clone(),
                 Value::Int(_) => Value::Int(eval_expr_sexp(state, value) as i64),
                 Value::Float(_) => Value::Float(eval_expr_sexp(state, value) as f32),
                 Value::Bool(_) => Value::Bool(eval_expr_sexp(state, value) != 0.0),
@@ -1035,6 +1078,42 @@ fn eval_handler(state: &mut HashMap<String, Value>, form: &Sexp) {
                 },
             };
             state.insert(name, next);
+        }
+        "append" | "remove" | "clear" => {
+            let name = items.get(1).and_then(Sexp::text).unwrap_or_default();
+            let Some(Value::List(_)) = state.get(&name) else {
+                return;
+            };
+            match head.as_str() {
+                "clear" => {
+                    if let Some(Value::List(list)) = state.get_mut(&name) {
+                        list.clear();
+                    }
+                }
+                "append" => {
+                    let text = match items.get(2) {
+                        Some(Sexp::Str(text)) => text.clone(),
+                        Some(Sexp::Sym(word)) => match state.get(word) {
+                            Some(Value::Text(text)) => text.clone(),
+                            Some(other) => other.show(),
+                            None => word.clone(),
+                        },
+                        Some(other) => other.text().unwrap_or_default(),
+                        None => String::new(),
+                    };
+                    if let Some(Value::List(list)) = state.get_mut(&name) {
+                        list.push(text);
+                    }
+                }
+                _ => {
+                    let index = items.get(2).map(|v| eval_expr_sexp(state, v)).unwrap_or(0.0) as usize;
+                    if let Some(Value::List(list)) = state.get_mut(&name) {
+                        if index < list.len() {
+                            list.remove(index);
+                        }
+                    }
+                }
+            }
         }
         "if" => {
             let condition = items.get(1);
@@ -1277,6 +1356,43 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
                 });
             }
             ui.advance_cursor_after_rect(canvas);
+        }
+        "list" => {
+            // строки с удалением; идём по копии, чтобы не спорить с заимствованием
+            let field = node.bind.clone().unwrap_or_default();
+            let rows = match state.get(&field) {
+                Some(Value::List(items)) => items.clone(),
+                _ => Vec::new(),
+            };
+            if rows.is_empty() {
+                let hint = if node.text.is_empty() {
+                    "пусто"
+                } else {
+                    node.text.as_str()
+                };
+                ui.label(
+                    egui::RichText::new(hint)
+                        .size(12.0)
+                        .color(egui::Color32::from_gray(130)),
+                );
+            } else {
+                let mut remove_at = None;
+                for (i, item) in rows.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        if ui.small_button("✖").clicked() {
+                            remove_at = Some(i);
+                        }
+                        ui.label(item);
+                    });
+                }
+                if let Some(i) = remove_at {
+                    if let Some(Value::List(items)) = state.get_mut(&field) {
+                        if i < items.len() {
+                            items.remove(i);
+                        }
+                    }
+                }
+            }
         }
         "custom" => {
             // Свой виджет — это Rust-код, ему нужна сборка. В рантайме честно говорим об этом,
