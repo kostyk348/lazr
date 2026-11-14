@@ -45,10 +45,12 @@ jobs:
           # в CI реестр пустой: сначала тянем зависимости, потом собираем офлайн
           cargo fetch --manifest-path /tmp/ci-dash/app/Cargo.toml || cargo fetch --manifest-path /tmp/ci-dash/app/Cargo.toml
           cargo run -q -- package /tmp/ci-dash
-          test -f /tmp/ci-dash/dist/app.desktop
+          # заголовок модели «Пульт» → имя пакета pult (транслитерация)
+          test -f /tmp/ci-dash/dist/pult
+          test -f /tmp/ci-dash/dist/pult.desktop
           test -f /tmp/ci-dash/dist/icon.svg
-          test -f /tmp/ci-dash/dist/app-debug.tar.gz
-          grep -q 'Name=' /tmp/ci-dash/dist/app.desktop
+          test -f /tmp/ci-dash/dist/pult-debug.tar.gz
+          grep -q 'Name=Пульт' /tmp/ci-dash/dist/pult.desktop
       - name: S-выражения и пример Paint разбираются
         run: |
           cargo run -q -- lisp examples/paint.lisp > /tmp/paint.lazr
