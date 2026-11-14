@@ -66,6 +66,12 @@ jobs:
           cargo run -q -- live examples/live-demo.lazr --check | tee /tmp/live-check.txt
           grep -q 'count: 0 → 1' /tmp/live-check.txt
           grep -q 'check ok: действий 3' /tmp/live-check.txt
+      - name: S-выражения исполняются без конвертации
+        run: |
+          cargo run -q -- live examples/live-demo.lisp --check | tee /tmp/sexpr-check.txt
+          grep -q 'count: 0 → 1' /tmp/sexpr-check.txt
+          cargo run -q -- live examples/live-demo.lisp --problems
+          cargo run -q -- live examples/paint.lisp --problems
       - name: место, тема и арифметика в рантайме
         run: |
           cargo run -q -- live examples/dashboard.lazr --check | tee /tmp/dash-check.txt

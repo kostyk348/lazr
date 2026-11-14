@@ -9,9 +9,13 @@ pub const RUNTIME_SRC: &str = r####"//! Сгенерировано lazr live. П
 #![allow(clippy::all)]
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use eframe::egui;
+
+/// --trace: печатать каждое применение обработчика (для проверок и отладки).
+static TRACE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, PartialEq)]
 enum Value {
@@ -55,6 +59,8 @@ struct Node {
     box_size: Option<(f32, f32)>,
     /// Якорь: (справа, снизу).
     anchor: (bool, bool),
+    /// Обработчик как форма: исполняется, а не пересказывается строкой.
+    handler: Option<Sexp>,
     children: Vec<Node>,
 }
 
@@ -109,6 +115,21 @@ fn parse_style(token: &str, node: &mut Node) {
             "bold" => node.bold = true,
             _ => {}
         }
+    }
+}
+
+/// Модель в любом из двух синтаксисов: S-выражения или строчные формы.
+fn parse_any(text: &str) -> (Model, Vec<String>) {
+    // первая содержательная строка решает синтаксис: комментарии и пустые не в счёт
+    let first = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with(';'))
+        .unwrap_or("");
+    if first.starts_with('(') {
+        parse_sexpr_model(text)
+    } else {
+        parse_model(text)
     }
 }
 
@@ -577,6 +598,486 @@ fn walk<'a>(nodes: &'a [Node]) -> Vec<&'a Node> {
     out
 }
 
+// --- S-выражения: модель исполняется, а не пересказывается строкой ----------------
+
+#[derive(Clone, Debug, PartialEq)]
+enum Sexp {
+    Str(String),
+    Sym(String),
+    Num(f64),
+    List(Vec<Sexp>),
+}
+
+impl Sexp {
+    fn text(&self) -> Option<String> {
+        match self {
+            Sexp::Str(text) | Sexp::Sym(text) => Some(text.clone()),
+            Sexp::Num(value) => Some(format!("{value}")),
+            Sexp::List(_) => None,
+        }
+    }
+    fn num(&self) -> Option<f64> {
+        match self {
+            Sexp::Num(value) => Some(*value),
+            Sexp::Sym(text) => text.parse().ok(),
+            _ => None,
+        }
+    }
+}
+
+fn read_sexps(source: &str) -> Result<Vec<Sexp>, String> {
+    let chars: Vec<char> = source.chars().collect();
+    let mut index = 0;
+    let mut forms = Vec::new();
+    while let Some(form) = read_form(&chars, &mut index)? {
+        forms.push(form);
+    }
+    Ok(forms)
+}
+
+fn read_form(chars: &[char], index: &mut usize) -> Result<Option<Sexp>, String> {
+    while *index < chars.len() && chars[*index].is_whitespace() {
+        *index += 1;
+    }
+    if *index >= chars.len() {
+        return Ok(None);
+    }
+    match chars[*index] {
+        ';' => {
+            while *index < chars.len() && chars[*index] != '\n' {
+                *index += 1;
+            }
+            read_form(chars, index)
+        }
+        '(' => {
+            *index += 1;
+            let mut items = Vec::new();
+            loop {
+                while *index < chars.len() && chars[*index].is_whitespace() {
+                    *index += 1;
+                }
+                if *index >= chars.len() {
+                    return Err("скобка не закрыта".to_string());
+                }
+                if chars[*index] == ')' {
+                    *index += 1;
+                    return Ok(Some(Sexp::List(items)));
+                }
+                match read_form(chars, index)? {
+                    Some(form) => items.push(form),
+                    None => return Err("неожиданный конец формы".to_string()),
+                }
+            }
+        }
+        ')' => Err("лишняя «)»".to_string()),
+        '"' if chars.get(*index + 1) == Some(&'"') && chars.get(*index + 2) == Some(&'"') => {
+            // сырая строка """…""" — в ней живёт Rust-код, модель его не трогает
+            *index += 3;
+            let mut text = String::new();
+            loop {
+                if *index + 2 >= chars.len() {
+                    return Err("сырая строка не закрыта".to_string());
+                }
+                if chars[*index] == '"' && chars[*index + 1] == '"' && chars[*index + 2] == '"' {
+                    *index += 3;
+                    break;
+                }
+                text.push(chars[*index]);
+                *index += 1;
+            }
+            Ok(Some(Sexp::Str(text)))
+        }
+        '"' => {
+            *index += 1;
+            let mut text = String::new();
+            while *index < chars.len() && chars[*index] != '"' {
+                if chars[*index] == '\\' && *index + 1 < chars.len() {
+                    *index += 1;
+                    text.push(match chars[*index] {
+                        'n' => '\n',
+                        't' => '\t',
+                        other => other,
+                    });
+                } else {
+                    text.push(chars[*index]);
+                }
+                *index += 1;
+            }
+            if *index >= chars.len() {
+                return Err("строка не закрыта".to_string());
+            }
+            *index += 1;
+            Ok(Some(Sexp::Str(text)))
+        }
+        _ => {
+            let start = *index;
+            while *index < chars.len()
+                && !chars[*index].is_whitespace()
+                && chars[*index] != '('
+                && chars[*index] != ')'
+            {
+                *index += 1;
+            }
+            let word: String = chars[start..*index].iter().collect();
+            Ok(Some(match word.parse::<f64>() {
+                Ok(value) => Sexp::Num(value),
+                Err(_) => Sexp::Sym(word),
+            }))
+        }
+    }
+}
+
+/// Модель из S-выражений: формы верхнего уровня → дерево и обработчики-формы.
+fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
+    let mut problems = Vec::new();
+    let mut model = Model {
+        theme: Theme::default(),
+        title: "Окно".into(),
+        width: 520,
+        height: 380,
+        fields: Vec::new(),
+        root: Vec::new(),
+    };
+    let forms = match read_sexps(source) {
+        Ok(forms) => forms,
+        Err(err) => {
+            problems.push(format!("не прочитать S-выражения: {err}"));
+            return (model, problems);
+        }
+    };
+    let mut counter = 0usize;
+    for form in forms {
+        let Sexp::List(items) = &form else { continue };
+        let head = items.first().and_then(Sexp::text).unwrap_or_default();
+        let args = &items[1..];
+        match head.as_str() {
+            "window" => {
+                if let Some(title) = args.first().and_then(Sexp::text) {
+                    model.title = title;
+                }
+                if let Some(width) = args.get(1).and_then(Sexp::num) {
+                    model.width = width as u32;
+                }
+                if let Some(height) = args.get(2).and_then(Sexp::num) {
+                    model.height = height as u32;
+                }
+            }
+            "state" => {
+                let name = args.first().and_then(Sexp::text).unwrap_or_default();
+                let kind = args.get(1).and_then(Sexp::text).unwrap_or_default();
+                let value = match kind.as_str() {
+                    "int" => Value::Int(args.get(2).and_then(Sexp::num).unwrap_or(0.0) as i64),
+                    "float" => Value::Float(args.get(2).and_then(Sexp::num).unwrap_or(0.0) as f32),
+                    "bool" => Value::Bool(
+                        args.get(2).and_then(Sexp::text).as_deref() == Some("true"),
+                    ),
+                    _ => Value::Text(args.get(2).and_then(Sexp::text).unwrap_or_default()),
+                };
+                model.fields.push((name, value));
+            }
+            "theme" => {
+                for item in args {
+                    match item {
+                        Sexp::Sym(word) if word == "dark" => model.theme.dark = true,
+                        Sexp::Sym(word) if word == "light" => model.theme.dark = false,
+                        Sexp::Sym(word) if word.starts_with(':') => {}
+                        Sexp::Sym(word) => {
+                            let _ = word;
+                        }
+                        _ => {}
+                    }
+                }
+                // пары :ключ значение
+                let mut index = 0;
+                while index < args.len() {
+                    if let Sexp::Sym(key) = &args[index] {
+                        if let Some(name) = key.strip_prefix(':') {
+                            let value = args.get(index + 1);
+                            match name {
+                                "accent" => {
+                                    if let Some(text) = value.and_then(Sexp::text) {
+                                        model.theme.accent = hex_color(&text);
+                                    }
+                                }
+                                "font" => {
+                                    if let Some(num) = value.and_then(Sexp::num) {
+                                        model.theme.font = num as f32;
+                                    }
+                                }
+                                "spacing" => {
+                                    if let Some(num) = value.and_then(Sexp::num) {
+                                        model.theme.spacing = num as f32;
+                                    }
+                                }
+                                "round" => {
+                                    if let Some(num) = value.and_then(Sexp::num) {
+                                        model.theme.round = num as u8;
+                                    }
+                                }
+                                _ => {}
+                            }
+                            index += 2;
+                            continue;
+                        }
+                    }
+                    index += 1;
+                }
+            }
+            "rust-field" | "rust-init" | "rust-widget" | "rust-fn" | "rust-item" => {}
+            _ => match build_node(&head, args, &mut counter, &mut problems) {
+                Ok(Some(node)) => model.root.push(node),
+                Ok(None) => {}
+                Err(err) => problems.push(err),
+            },
+        }
+    }
+    let names: Vec<String> = model.fields.iter().map(|(name, _)| name.clone()).collect();
+    for node in walk(&model.root) {
+        if let Some(bind) = &node.bind {
+            if !names.contains(bind) {
+                problems.push(format!("поле «{bind}» не объявлено в state"));
+            }
+        }
+    }
+    problems.sort();
+    problems.dedup();
+    (model, problems)
+}
+
+fn build_node(
+    head: &str,
+    args: &[Sexp],
+    counter: &mut usize,
+    problems: &mut Vec<String>,
+) -> Result<Option<Node>, String> {
+    // в DSL дефис, в отрисовке подчёркивание: text-input → text_input
+    let kind = head.replace('-', "_");
+    let mut node = Node {
+        kind: kind.clone(),
+        ..Default::default()
+    };
+    let container = matches!(head, "vbox" | "hbox" | "grid" | "scroll" | "place");
+    let mut index = 0;
+    if !container {
+        if let Some(first) = args.first() {
+            match first {
+                Sexp::List(_) => {}
+                other => {
+                    if let Some(text) = other.text() {
+                        node.text = text;
+                        index = 1;
+                    }
+                }
+            }
+        }
+    }
+    if head == "place" {
+        if let (Some(width), Some(height)) = (
+            args.first().and_then(Sexp::num),
+            args.get(1).and_then(Sexp::num),
+        ) {
+            node.box_size = Some((width as f32, height as f32));
+            index = 2;
+        }
+    }
+    while index < args.len() {
+        match &args[index] {
+            Sexp::List(items) => {
+                let child_head = items.first().and_then(Sexp::text).unwrap_or_default();
+                if child_head == "set!" || child_head == "if" || child_head == "do" {
+                    node.handler = Some(Sexp::List(items.clone()));
+                } else {
+                    match build_node(&child_head, &items[1..], counter, problems) {
+                        Ok(Some(child)) => node.children.push(child),
+                        Ok(None) => {}
+                        Err(err) => problems.push(err),
+                    }
+                }
+                index += 1;
+            }
+            Sexp::Sym(key) if key.starts_with(':') => {
+                let name = key.trim_start_matches(':');
+                let value = args.get(index + 1).cloned();
+                match name {
+                    "bind" => node.bind = value.and_then(|v| v.text()),
+                    "size" => node.size = value.and_then(|v| v.num()).map(|v| v as f32),
+                    "bold" => node.bold = true,
+                    "color" => node.color = value.and_then(|v| v.text()),
+                    "at" => {
+                        if let (Some(x), Some(y)) = (
+                            value.as_ref().and_then(Sexp::num),
+                            args.get(index + 2).and_then(Sexp::num),
+                        ) {
+                            node.at = Some((x as f32, y as f32));
+                            index += 1;
+                        }
+                    }
+                    "box" => {
+                        if let (Some(w), Some(h)) = (
+                            value.as_ref().and_then(Sexp::num),
+                            args.get(index + 2).and_then(Sexp::num),
+                        ) {
+                            node.box_size = Some((w as f32, h as f32));
+                            index += 1;
+                        }
+                    }
+                    "anchor" => {
+                        let text = value.and_then(|v| v.text()).unwrap_or_default();
+                        node.anchor = (text.contains("right"), text.contains("bottom"));
+                    }
+                    "range" => {}
+                    _ => {}
+                }
+                index += 2;
+            }
+            Sexp::Sym(word) if word == "at" => {
+                if let (Some(x), Some(y)) = (
+                    args.get(index + 1).and_then(Sexp::num),
+                    args.get(index + 2).and_then(Sexp::num),
+                ) {
+                    node.at = Some((x as f32, y as f32));
+                    index += 3;
+                } else {
+                    index += 1;
+                }
+            }
+            Sexp::Sym(word) if word == "size" => {
+                if let Some(text) = args.get(index + 1).and_then(Sexp::text) {
+                    if let Some((width, height)) = text.split_once('x') {
+                        if let (Ok(width), Ok(height)) = (width.parse(), height.parse()) {
+                            node.box_size = Some((width, height));
+                        }
+                    }
+                }
+                index += 2;
+            }
+            Sexp::Sym(word) if word == "anchor" => {
+                let mut right = false;
+                let mut bottom = false;
+                let mut step = 1;
+                for extra in args.iter().skip(index + 1) {
+                    match extra.text().as_deref() {
+                        Some("right") => {
+                            right = true;
+                            step += 1;
+                        }
+                        Some("bottom") => {
+                            bottom = true;
+                            step += 1;
+                        }
+                        Some("left") | Some("top") | Some("center") => step += 1,
+                        _ => break,
+                    }
+                }
+                node.anchor = (right, bottom);
+                index += step;
+            }
+            Sexp::Sym(word) if word == "do" => {
+                match args.get(index + 1) {
+                    Some(Sexp::List(items)) => {
+                        node.handler = Some(Sexp::List(items.clone()));
+                    }
+                    Some(Sexp::Str(text)) => node.effect = Some(text.clone()),
+                    _ => {}
+                }
+                index += 2;
+            }
+            Sexp::Num(value) => {
+                node.number = Some(*value as f32);
+                index += 1;
+            }
+            Sexp::Sym(_) => index += 1,
+            _ => index += 1,
+        }
+    }
+    if !matches!(
+        kind.as_str(),
+        "label" | "button" | "checkbox" | "text_input" | "slider" | "space" | "separator" | "vbox"
+            | "hbox" | "grid" | "scroll" | "place" | "custom"
+    ) {
+        return Err(format!("форма «{head}» рантайму неизвестна"));
+    }
+    Ok(Some(node))
+}
+
+/// Исполнение обработчика как формы: (set! x (+ x 1)), (if ...), (do ...).
+fn eval_handler(state: &mut HashMap<String, Value>, form: &Sexp) {
+    let Sexp::List(items) = form else { return };
+    let head = items.first().and_then(Sexp::text).unwrap_or_default();
+    match head.as_str() {
+        "do" => {
+            for item in &items[1..] {
+                eval_handler(state, item);
+            }
+        }
+        "set!" => {
+            let name = items.get(1).and_then(Sexp::text).unwrap_or_default();
+            let Some(value) = items.get(2) else { return };
+            let current = state.get(&name).cloned().unwrap_or(Value::Int(0));
+            let next = match &current {
+                Value::Int(_) => Value::Int(eval_expr_sexp(state, value) as i64),
+                Value::Float(_) => Value::Float(eval_expr_sexp(state, value) as f32),
+                Value::Bool(_) => Value::Bool(eval_expr_sexp(state, value) != 0.0),
+                Value::Text(_) => match value {
+                    Sexp::Str(text) => Value::Text(text.clone()),
+                    other => Value::Text(other.text().unwrap_or_default()),
+                },
+            };
+            state.insert(name, next);
+        }
+        "if" => {
+            let condition = items.get(1);
+            let then_form = items.get(2);
+            let else_form = items.get(3);
+            let truth = condition.map(|c| eval_condition_sexp(state, c)).unwrap_or(false);
+            if truth {
+                if let Some(form) = then_form {
+                    eval_handler(state, form);
+                }
+            } else if let Some(form) = else_form {
+                eval_handler(state, form);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn eval_condition_sexp(state: &HashMap<String, Value>, form: &Sexp) -> bool {
+    let Sexp::List(items) = form else { return false };
+    let op = items.first().and_then(Sexp::text).unwrap_or_default();
+    let left = items.get(1).map(|v| eval_expr_sexp(state, v)).unwrap_or(0.0);
+    let right = items.get(2).map(|v| eval_expr_sexp(state, v)).unwrap_or(0.0);
+    match op.as_str() {
+        ">=" => left >= right,
+        "<=" => left <= right,
+        ">" => left > right,
+        "<" => left < right,
+        "==" => (left - right).abs() < f32::EPSILON,
+        "!=" => (left - right).abs() >= f32::EPSILON,
+        _ => false,
+    }
+}
+
+fn eval_expr_sexp(state: &HashMap<String, Value>, form: &Sexp) -> f32 {
+    match form {
+        Sexp::Num(value) => *value as f32,
+        Sexp::Str(text) => text.parse().unwrap_or(0.0),
+        Sexp::Sym(name) => state.get(name).map(Value::as_f32).unwrap_or(0.0),
+        Sexp::List(items) => {
+            let op = items.first().and_then(Sexp::text).unwrap_or_default();
+            let left = items.get(1).map(|v| eval_expr_sexp(state, v)).unwrap_or(0.0);
+            let right = items.get(2).map(|v| eval_expr_sexp(state, v)).unwrap_or(0.0);
+            match op.as_str() {
+                "+" => left + right,
+                "-" => left - right,
+                "*" => left * right,
+                "/" if right.abs() > f32::EPSILON => left / right,
+                _ => left,
+            }
+        }
+    }
+}
+
 fn apply_theme(ctx: &egui::Context, theme: &Theme) {
     ctx.set_theme(if theme.dark {
         egui::ThemePreference::Dark
@@ -642,8 +1143,32 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
         }
         "button" => {
             if ui.button(rich(text_with(state, &node.text))).clicked() {
-                if let Some(effect) = &node.effect {
+                let before = state.clone();
+                if let Some(handler) = &node.handler {
+                    eval_handler(state, handler);
+                } else if let Some(effect) = &node.effect {
                     run_effect(state, effect);
+                }
+                if TRACE.load(Ordering::Relaxed) {
+                    let mut changes: Vec<String> = Vec::new();
+                    for (name, value) in state.iter() {
+                        if before.get(name) != Some(value) {
+                            changes.push(format!(
+                                "{name}: {} → {}",
+                                before.get(name).map(Value::show).unwrap_or_default(),
+                                value.show()
+                            ));
+                        }
+                    }
+                    eprintln!(
+                        "click «{}»: {}",
+                        node.text,
+                        if changes.is_empty() {
+                            "без изменений".to_string()
+                        } else {
+                            changes.join(", ")
+                        }
+                    );
                 }
             }
         }
@@ -771,7 +1296,7 @@ impl LiveApp {
                 return;
             }
         };
-        let (model, problems) = parse_model(&text);
+        let (model, problems) = parse_any(&text);
         self.problems = problems;
         // сохраняем значения полей, которые уже были: перезагрузка не должна сбрасывать ввод
         let mut state = HashMap::new();
@@ -838,7 +1363,7 @@ impl eframe::App for LiveApp {
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| "form.lazr".to_string());
     let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let (model, problems) = parse_model(&text);
+    let (model, problems) = parse_any(&text);
     let mut state = HashMap::new();
     for (name, value) in &model.fields {
         state.insert(name.clone(), value.clone());
@@ -854,6 +1379,9 @@ fn main() {
         modified: std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
         applied_theme: None,
     };
+    if std::env::args().any(|arg| arg == "--trace") {
+        TRACE.store(true, Ordering::Relaxed);
+    }
     if std::env::args().any(|arg| arg == "--problems") {
         // Машинная проверка модели: то же, что видно в красной плашке.
         for problem in &app.problems {
@@ -873,9 +1401,15 @@ fn main() {
             if node.kind != "button" {
                 continue;
             }
-            let Some(effect) = &node.effect else { continue };
+            if node.handler.is_none() && node.effect.is_none() {
+                continue;
+            }
             let before = app.state.clone();
-            run_effect(&mut app.state, effect);
+            match (&node.handler, &node.effect) {
+                (Some(handler), _) => eval_handler(&mut app.state, handler),
+                (None, Some(effect)) => run_effect(&mut app.state, effect),
+                _ => {}
+            }
             actions += 1;
             let mut changes: Vec<String> = Vec::new();
             for (name, value) in &app.state {
@@ -885,8 +1419,12 @@ fn main() {
                     None => changes.push(format!("{name}: появилось {}", value.show())),
                 }
             }
+            let shown = node
+                .effect
+                .clone()
+                .unwrap_or_else(|| "форма".to_string());
             if changes.is_empty() {
-                println!("  «{}»: без изменений ({effect})", node.text);
+                println!("  «{}»: без изменений ({shown})", node.text);
             } else {
                 println!("  «{}»: {}", node.text, changes.join(", "));
             }

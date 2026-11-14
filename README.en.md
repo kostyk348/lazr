@@ -190,6 +190,19 @@ towards "Rust is the HAL, everything else is a DSL".
 Supported today: window, states, `label`, `button`, `checkbox`, `text_input`, `slider`, `space`, `separator`,
 `vbox`, `hbox`, `grid`, `scroll`, `{size, bold, color}` styles, `{field}` interpolation.
 
+The runtime **executes S-expressions directly** — no conversion to the line model, no supervisor thread: a
+handler is kept as a form and evaluated, not restated as a string (`(button "Plus" (set! count (+ count 1)))`).
+It understands `set!`, `if` with `> < >= <= == !=`, `do` and arithmetic over fields; raw strings `"""…"""` (where
+generator Rust lives) are skipped. The line model works too — the syntax is detected from the first meaningful
+line of the file.
+
+Clicks can be traced: `lazr live FILE --trace` prints every handler application —
+
+```
+click "Plus": count: 0 → 1
+click "Plus": count: 1 → 2
+```
+
 The runtime also understands what used to be generator-only: `place` with absolute `at X Y` points, `size WxH`
 boxes and `anchor right bottom`; the `theme` line (dark/light base, accent, font, spacing, radius); arithmetic in
 actions — `count = count + limit`, `limit = limit * 2`, `count -= count - 1`. Blocks `rust widget/fn/init` are
