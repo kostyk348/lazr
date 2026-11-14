@@ -4,7 +4,7 @@
 ; сетка пульта задана числами, как в Lazarus-форме. Тема — одна строка.
 (window "Пульт" 820 560)
 
-(theme dark accent "#388bfd" font 15 spacing 10 round 8)
+(theme dark accent "#388bfd" font 14 spacing 8 round 8)
 
 (state demand int 17)
 (state capacity int 2)
