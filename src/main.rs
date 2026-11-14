@@ -115,7 +115,7 @@ fn print_help() {
   gen DIR                             перегенерировать app/
   build DIR                           cargo build --offline в app/
   headless DIR                        исполнить интерфейс один кадр без окна
-  live FILE [--headless]              рантайм: окно читает модель на ходу
+  live FILE [--headless] [--check]    рантайм: окно читает модель на ходу
   lisp FILE [--to DIR]                S-выражения → модель (и проект, если --to)
   mcp                                 MCP-сервер на stdin/stdout
   demo                                сквозная проверка на живом примере
@@ -454,6 +454,9 @@ fn cmd_live(args: &[String]) -> i32 {
     command.arg(&model_path);
     if opts.has("headless") {
         command.arg("--headless");
+    }
+    if opts.has("check") {
+        command.arg("--check");
     }
     match command.status() {
         Ok(status) if status.success() => 0,

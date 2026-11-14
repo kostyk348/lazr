@@ -161,7 +161,15 @@ fn parse_model(text: &str) -> Model {
                 parse_style(token, &mut node);
                 i += 1;
             } else if token == "do" {
-                node.effect = Some(words[i + 1..].join(" "));
+                // Действие кончается там, где начинается стиль {…} или привязка ->.
+                let mut end = words.len();
+                for (offset, item) in words.iter().enumerate().skip(i + 1) {
+                    if item.starts_with('{') || item == "->" {
+                        end = offset;
+                        break;
+                    }
+                }
+                node.effect = Some(words[i + 1..end].join(" "));
                 break;
             } else if token == "->" {
                 node.bind = words.get(i + 1).cloned();
@@ -370,6 +378,15 @@ fn number_of(state: &HashMap<String, Value>, name: &str) -> f32 {
         .unwrap_or(0.0)
 }
 
+fn walk<'a>(nodes: &'a [Node]) -> Vec<&'a Node> {
+    let mut out = Vec::new();
+    for node in nodes {
+        out.push(node);
+        out.extend(walk(&node.children));
+    }
+    out
+}
+
 fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>) {
     let mut rich = |text: String| {
         let mut out = egui::RichText::new(text);
@@ -542,16 +559,44 @@ fn main() {
     let width = model.width as f32;
     let height = model.height as f32 + 44.0;
     let title = model.title.clone();
-    let app = LiveApp {
+    let mut app = LiveApp {
         path: path.clone(),
         model,
         state,
         modified: std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
         themed: false,
     };
+    if std::env::args().any(|arg| arg == "--check") {
+        // Проверка действий без окна: каждое действие применяется к состоянию,
+        // печатается, какие поля изменились. Это и есть «функция работает».
+        let mut actions = 0;
+        for node in walk(&app.model.root) {
+            if node.kind != "button" {
+                continue;
+            }
+            let Some(effect) = &node.effect else { continue };
+            let before = app.state.clone();
+            run_effect(&mut app.state, effect);
+            actions += 1;
+            let mut changes: Vec<String> = Vec::new();
+            for (name, value) in &app.state {
+                match before.get(name) {
+                    Some(old) if old == value => {}
+                    Some(old) => changes.push(format!("{name}: {} → {}", old.show(), value.show())),
+                    None => changes.push(format!("{name}: появилось {}", value.show())),
+                }
+            }
+            if changes.is_empty() {
+                println!("  «{}»: без изменений ({effect})", node.text);
+            } else {
+                println!("  «{}»: {}", node.text, changes.join(", "));
+            }
+        }
+        println!("check ok: действий {actions}");
+        return;
+    }
     if std::env::args().any(|arg| arg == "--headless") {
         let ctx = egui::Context::default();
-        let mut app = app;
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             for node in app.model.root.clone() {
                 draw_node(ui, &node, &mut app.state);

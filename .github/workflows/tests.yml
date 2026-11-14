@@ -54,6 +54,11 @@ jobs:
       - name: рантайм live собирается и читает модель
         run: |
           cargo run -q -- live examples/live-demo.lazr --headless
+      - name: действия в рантайме применяются (--check)
+        run: |
+          cargo run -q -- live examples/live-demo.lazr --check | tee /tmp/live-check.txt
+          grep -q 'count: 0 → 1' /tmp/live-check.txt
+          grep -q 'check ok: действий 3' /tmp/live-check.txt
       - name: S-выражения и пример Paint разбираются
         run: |
           cargo run -q -- lisp examples/paint.lisp > /tmp/paint.lazr

@@ -190,10 +190,23 @@ towards "Rust is the HAL, everything else is a DSL".
 Supported today: window, states, `label`, `button`, `checkbox`, `text_input`, `slider`, `space`, `separator`,
 `vbox`, `hbox`, `grid`, `scroll`, `{size, bold, color}` styles, `{field}` interpolation.
 
-**Honest status:** hot reload is verified — an external edit changes the window (new rows and a green heading
-appeared without a rebuild). Button actions in the runtime are **not confirmed**: the counter did not change in
-the runs, so they cannot be called working. The generator (`lazr build`) does run actions correctly; the gap is
-in the runtime, and that is the next step.
+Verification without a window and without eyeballs:
+
+```console
+$ lazr live examples/live-demo.lazr --check
+  "Plus": count: 0 → 1
+  "Minus": count: 1 → 0
+  "Reset": no changes (count = 0)
+check ok: 3 actions
+```
+
+`--check` applies every action in the model to the state and prints which fields changed — it verifies the
+effect of the handlers the same way `lazr verify` verifies a generated app. In the window it is verified
+separately: three clicks on "Plus" give "Clicks: 3 of 5", and an external edit changes the window without a
+rebuild.
+
+What the runtime does not have yet: `custom` widgets and `place` (they need code generation), and complex action
+expressions — the runtime understands assignment, `+=`/`-=`, `!bool`, strings and a single-branch `if`.
 
 ## Install
 
