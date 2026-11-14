@@ -66,6 +66,12 @@ jobs:
           cargo run -q -- live examples/live-demo.lazr --check | tee /tmp/live-check.txt
           grep -q 'count: 0 → 1' /tmp/live-check.txt
           grep -q 'check ok: действий 3' /tmp/live-check.txt
+      - name: все демки чистые (--problems = 0)
+        run: |
+          for model in examples/*.lisp examples/*.lazr; do
+            echo "— $model"
+            cargo run -q -- live "$model" --problems
+          done
       - name: S-выражения исполняются без конвертации
         run: |
           cargo run -q -- live examples/live-demo.lisp --check | tee /tmp/sexpr-check.txt

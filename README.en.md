@@ -233,6 +233,23 @@ picked up without a rebuild (verified: changing the heading in `.lisp` changes t
 What the runtime does not have yet: `custom` widgets and `place` (they need code generation), and complex action
 expressions — the runtime understands assignment, `+=`/`-=`, `!bool`, strings and a single-branch `if`.
 
+## Demos
+
+All of them live in `examples/` and all are machine-checked (`lazr live <file> --problems` → 0, `--check` prints
+the effect of every action):
+
+| File | What it shows |
+|---|---|
+| `paint.lisp` | Paint: 8 tools, palette, undo, contour fill, files and system dialogs |
+| `dashboard.lisp` | Dashboard: absolute `place` layout, anchors, theme, cards |
+| `calc.lisp` | Budget: arithmetic in handlers (`*`, `/`), step slider |
+| `settings.lisp` | Settings: light theme, checkbox, slider, text input, `do` with two assignments |
+| `quiz.lisp` | Quiz: two counters, several actions in one button |
+| `live-demo.lisp` / `.lazr` | Runtime showcase: edit the file, the window follows without a rebuild |
+
+A custom widget cannot exist in the runtime (it is Rust code), so `custom` is drawn as an honest placeholder
+saying a build is required instead of silently disappearing.
+
 ## Install
 
 ```console

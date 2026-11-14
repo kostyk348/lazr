@@ -150,10 +150,21 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
         "scroll", "place", "custom",
     ];
     let mut in_rust = false;
+    // глубина фигурных скобок внутри блока rust: внутри бывают свои «}»,
+    // поэтому одной строки «}» недостаточно
+    let mut rust_depth: i32 = 0;
+    let braces = |text: &str| -> i32 {
+        text.chars().fold(0, |acc, ch| match ch {
+            '{' => acc + 1,
+            '}' => acc - 1,
+            _ => acc,
+        })
+    };
     for (line_no, line) in text.lines().enumerate() {
         let trimmed = line.trim();
         if in_rust {
-            if trimmed == "}" {
+            rust_depth += braces(trimmed);
+            if rust_depth <= 0 {
                 in_rust = false;
             }
             continue;
@@ -163,8 +174,8 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
         }
         if trimmed.starts_with("rust ") {
             // код на Rust живёт в генераторе, не в рантайме
-            // «rust widget x {» открывает блок; закрывающая «}» придёт отдельной строкой
-            in_rust = !trimmed.ends_with('}');
+            in_rust = true;
+            rust_depth = braces(trimmed);
             continue;
         }
         let depth = line.len() - line.trim_start().len();
@@ -1266,6 +1277,34 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
                 });
             }
             ui.advance_cursor_after_rect(canvas);
+        }
+        "custom" => {
+            // Свой виджет — это Rust-код, ему нужна сборка. В рантайме честно говорим об этом,
+            // а не пропускаем молча.
+            let name = if node.text.is_empty() {
+                "custom".to_string()
+            } else {
+                node.text.clone()
+            };
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(28, 30, 38))
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    egui::Color32::from_rgb(120, 96, 48),
+                ))
+                .inner_margin(8.0)
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("⚙ {name}"))
+                            .size(12.0)
+                            .color(egui::Color32::from_rgb(230, 180, 100)),
+                    );
+                    ui.label(
+                        egui::RichText::new("свой виджет: нужна сборка (lazr build)")
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(150, 140, 120)),
+                    );
+                });
         }
         "scroll" => {
             egui::ScrollArea::vertical().show(ui, |ui| {

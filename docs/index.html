@@ -20,6 +20,7 @@
   a:hover{text-decoration:underline}
   code,pre{font-family:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,monospace}
   .wrap{max-width:1060px;margin:0 auto;padding:0 24px}
+  .top{display:flex;justify-content:flex-end;gap:10px;padding-top:18px;font-size:14px;color:var(--muted)}
   header{padding:64px 0 32px;display:flex;gap:32px;align-items:center;flex-wrap:wrap}
   header img{width:112px;height:112px;filter:drop-shadow(0 12px 32px rgba(242,117,31,.25))}
   h1{font-size:clamp(38px,6vw,64px);line-height:1;margin:0 0 12px;letter-spacing:-.02em}
@@ -60,6 +61,11 @@
   .honest li{margin:6px 0}
   footer{padding:40px 0 64px;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
   .links{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
+  .demos{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+  .demo{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  .demo h3{margin:0 0 4px;font-size:16px}
+  .demo p{margin:0;color:var(--muted);font-size:13.5px}
+  .demo code{font-size:12.5px;color:var(--amber)}
   .term{background:#0b0f14;border:1px solid var(--line);border-radius:14px;padding:16px 18px;font-size:13.5px;
         overflow:auto;color:#cfd8e6}
   .term .ok{color:var(--green)} .term .p{color:var(--flame)}
@@ -67,6 +73,8 @@
 </head>
 <body>
 <div class="wrap">
+
+<div class="top"><b>Русский</b> · <a href="index.en.html">English</a></div>
 
 <header>
   <img src="logo.svg" alt="логотип lazr: скобки S-выражения и лямбда в окне">
@@ -238,6 +246,23 @@ selftest ok: 2 действий
       <li><b>Рантайм-Lisp</b> — S-выражения сегодня язык автора, а не интерпретатор внутри приложения.
         Lisp-машина в полном смысле (правка форм без пересборки) — следующий шаг.</li>
     </ul>
+  </div>
+</section>
+
+<section>
+  <h2>Демки</h2>
+  <p class="sub">Каждая демка — файл модели, и каждая проверена скриптами, а не «на глаз».</p>
+  <div class="demos">
+    <div class="demo"><h3>Краски</h3><p>Восемь инструментов, палитра, отмена, заливка контура, сохранение и
+      открытие через системный диалог.</p><code>examples/paint.lisp</code></div>
+    <div class="demo"><h3>Пульт</h3><p>Абсолютная раскладка: три карточки, журнал, кнопки по углам, якорная
+      подсказка.</p><code>examples/dashboard.lisp</code></div>
+    <div class="demo"><h3>Смета</h3><p>Арифметика в обработчиках: <code>(set! total (* total 2))</code>,
+      ползунок шага.</p><code>examples/calc.lisp</code></div>
+    <div class="demo"><h3>Настройки</h3><p>Светлая тема, чекбокс, слайдер, поле ввода, сброс через
+      <code>do</code>.</p><code>examples/settings.lisp</code></div>
+    <div class="demo"><h3>Викторина</h3><p>Счёт и число попыток, несколько действий в кнопке.</p><code>examples/quiz.lisp</code></div>
+    <div class="demo"><h3>Живая модель</h3><p>Витрина рантайма: правишь файл — окно следует.</p><code>examples/live-demo.lisp</code></div>
   </div>
 </section>
 
