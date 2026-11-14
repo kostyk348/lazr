@@ -1,0 +1,677 @@
+window "Краски" 900x760
+state tool string кисть
+state color string #1b1f24
+state size float 6
+state text string Привет
+state status string готово
+state file string /tmp/paint.ppm
+state dialog_kind string 
+rust field strokes Vec<Stroke> Vec::new()
+rust field undo Vec<Snapshot> Vec::new()
+rust field raster Vec<egui::Color32> Vec::new()
+rust field raster_w usize 0
+rust field raster_h usize 0
+rust field texture Option<egui::TextureHandle> None
+rust field dirty bool true
+rust field dialog Option<std::sync::mpsc::Receiver<String>> None
+rust fn paint_core {
+    
+    use std::sync::mpsc::Receiver;
+    
+    #[derive(Clone)]
+    pub struct Stroke {
+        pub kind: u8,
+        pub color: egui::Color32,
+        pub width: f32,
+        pub points: Vec<egui::Pos2>,
+        pub text: String,
+    }
+    
+    #[derive(Clone)]
+    pub struct Snapshot {
+        pub strokes: Vec<Stroke>,
+        pub raster: Vec<egui::Color32>,
+    }
+    
+    impl Stroke {
+        pub fn new(kind: u8, color: egui::Color32, width: f32, at: egui::Pos2) -> Stroke {
+            Stroke { kind, color, width, points: vec![at], text: String::new() }
+        }
+    
+        pub fn draw(&self, painter: &egui::Painter) {
+            let stroke = egui::Stroke::new(self.width, self.color);
+            match self.kind {
+                0 | 1 | 2 => {
+                    if self.points.len() < 2 {
+                        painter.circle_filled(self.points[0], (self.width / 2.0).max(0.5), self.color);
+                    } else {
+                        painter.add(egui::Shape::line(self.points.clone(), stroke));
+                    }
+                }
+                3 => {
+                    if let (Some(a), Some(b)) = (self.points.first(), self.points.last()) {
+                        painter.line_segment([*a, *b], stroke);
+                    }
+                }
+                4 => {
+                    if let (Some(a), Some(b)) = (self.points.first(), self.points.last()) {
+                        let rect = egui::Rect::from_two_pos(*a, *b);
+                        painter.add(egui::Shape::closed_line(
+                            vec![rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()],
+                            stroke,
+                        ));
+                    }
+                }
+                5 => {
+                    if let (Some(a), Some(b)) = (self.points.first(), self.points.last()) {
+                        let rect = egui::Rect::from_two_pos(*a, *b);
+                        painter.add(egui::Shape::ellipse_stroke(rect.center(), rect.size() / 2.0, stroke));
+                    }
+                }
+                6 => {
+                    if let Some(at) = self.points.first() {
+                        painter.text(*at, egui::Align2::LEFT_TOP, &self.text, egui::FontId::proportional(self.width), self.color);
+                    }
+                }
+                _ => {}
+            }
+        }
+    
+        /// Ломаная для растровой заливки: по ней строятся «стены».
+        pub fn outline(&self) -> Vec<egui::Pos2> {
+            match self.kind {
+                4 => {
+                    if let (Some(a), Some(b)) = (self.points.first(), self.points.last()) {
+                        let rect = egui::Rect::from_two_pos(*a, *b);
+                        vec![
+                            rect.left_top(),
+                            rect.right_top(),
+                            rect.right_bottom(),
+                            rect.left_bottom(),
+                            rect.left_top(),
+                        ]
+                    } else {
+                        Vec::new()
+                    }
+                }
+                5 => {
+                    if let (Some(a), Some(b)) = (self.points.first(), self.points.last()) {
+                        let rect = egui::Rect::from_two_pos(*a, *b);
+                        let center = rect.center();
+                        let radius = rect.size() / 2.0;
+                        (0..=96)
+                            .map(|i| {
+                                let angle = i as f32 / 96.0 * std::f32::consts::TAU;
+                                center + egui::vec2(radius.x * angle.cos(), radius.y * angle.sin())
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                }
+                _ => self.points.clone(),
+            }
+        }
+    
+        pub fn to_line(&self) -> String {
+            let c = self.color;
+            let mut out = format!(
+                "{};{};{};{};{};{}",
+                self.kind, c.r(), c.g(), c.b(), self.width, self.text
+            );
+            for p in &self.points {
+                out.push_str(&format!(";{:.1},{:.1}", p.x, p.y));
+            }
+            out
+        }
+    
+        pub fn from_line(line: &str) -> Option<Stroke> {
+            let parts: Vec<&str> = line.split(';').collect();
+            if parts.len() < 6 {
+                return None;
+            }
+            let mut stroke = Stroke {
+                kind: parts[0].parse().ok()?,
+                color: egui::Color32::from_rgb(
+                    parts[1].parse().unwrap_or(0),
+                    parts[2].parse().unwrap_or(0),
+                    parts[3].parse().unwrap_or(0),
+                ),
+                width: parts[4].parse().unwrap_or(2.0),
+                points: Vec::new(),
+                text: parts[5].to_string(),
+            };
+            for p in &parts[6..] {
+                let (x, y) = p.split_once(',')?;
+                stroke.points.push(egui::pos2(x.parse().ok()?, y.parse().ok()?));
+            }
+            Some(stroke)
+        }
+    }
+    
+    pub fn hex_color(text: &str) -> egui::Color32 {
+        let hex = text.trim().trim_start_matches('#');
+        let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2).unwrap_or("00"), 16).unwrap_or(0);
+        if hex.len() == 6 {
+            egui::Color32::from_rgb(byte(0), byte(2), byte(4))
+        } else {
+            egui::Color32::from_rgb(27, 31, 36)
+        }
+    }
+    
+    /// Ставит «стену» толщиной в радиус в точку растра.
+    pub fn stamp(blocked: &mut [bool], w: usize, h: usize, x: f32, y: f32, radius: f32) {
+        let r = radius.ceil() as i32;
+        let cx = x.round() as i32;
+        let cy = y.round() as i32;
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if (dx * dx + dy * dy) as f32 > radius * radius {
+                    continue;
+                }
+                let px = cx + dx;
+                let py = cy + dy;
+                if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
+                    blocked[py as usize * w + px as usize] = true;
+                }
+            }
+        }
+    }
+    
+    pub fn stamp_line(
+        blocked: &mut [bool],
+        w: usize,
+        h: usize,
+        a: egui::Pos2,
+        b: egui::Pos2,
+        radius: f32,
+    ) {
+        let dist = (b - a).length();
+        let steps = (dist * 2.0).ceil().max(1.0) as usize;
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let p = a + (b - a) * t;
+            stamp(blocked, w, h, p.x, p.y, radius);
+        }
+    }
+    
+    /// Заливка: обход в ширину по пикселям, ограниченный штрихами.
+    pub fn flood(
+        blocked: &[bool],
+        w: usize,
+        h: usize,
+        start: (usize, usize),
+        raster: &mut [egui::Color32],
+        color: egui::Color32,
+    ) -> usize {
+        let index = start.1 * w + start.0;
+        if index >= blocked.len() || blocked[index] {
+            return 0;
+        }
+        let mut queue: Vec<usize> = Vec::with_capacity(w * h / 8);
+        let mut seen = vec![false; w * h];
+        queue.push(index);
+        seen[index] = true;
+        let mut painted = 0;
+        while let Some(cell) = queue.pop() {
+            let x = cell % w;
+            let y = cell / w;
+            raster[cell] = color;
+            painted += 1;
+            if x > 0 && !seen[cell - 1] && !blocked[cell - 1] {
+                seen[cell - 1] = true;
+                queue.push(cell - 1);
+            }
+            if x + 1 < w && !seen[cell + 1] && !blocked[cell + 1] {
+                seen[cell + 1] = true;
+                queue.push(cell + 1);
+            }
+            if y > 0 && !seen[cell - w] && !blocked[cell - w] {
+                seen[cell - w] = true;
+                queue.push(cell - w);
+            }
+            if y + 1 < h && !seen[cell + w] && !blocked[cell + w] {
+                seen[cell + w] = true;
+                queue.push(cell + w);
+            }
+        }
+        painted
+    }
+    
+    /// Системный диалог выбора файла: zenity, при его отсутствии — kdialog.
+    pub fn pick_file(save: bool, default_path: &str) -> Option<Receiver<String>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let filename = format!("--filename={default_path}");
+        let spawned = if save {
+            std::process::Command::new("zenity")
+                .args([
+                    "--file-selection",
+                    "--save",
+                    "--confirm-overwrite",
+                    "--title=Сохранить",
+                    &filename,
+                ])
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+        } else {
+            std::process::Command::new("zenity")
+                .args(["--file-selection", "--title=Открыть", &filename])
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+        };
+        let child = match spawned {
+            Ok(child) => child,
+            Err(_) => {
+                let fallback = if save {
+                    std::process::Command::new("kdialog")
+                        .args(["--getsavefilename", default_path])
+                        .stdout(std::process::Stdio::piped())
+                        .spawn()
+                } else {
+                    std::process::Command::new("kdialog")
+                        .args(["--getopenfilename", ".", "*.ppm"])
+                        .stdout(std::process::Stdio::piped())
+                        .spawn()
+                };
+                match fallback {
+                    Ok(child) => child,
+                    Err(_) => return None,
+                }
+            }
+        };
+        std::thread::spawn(move || {
+            let mut child = child;
+            // ждём закрытия диалога и забираем путь
+            let _ = &mut child;
+            let path = match child.wait_with_output() {
+                Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                _ => String::new(),
+            };
+            let _ = tx.send(path);
+        });
+        Some(rx)
+    }
+    
+    /// PPM (P6) — формат без зависимостей, который понимают все просмотрщики.
+    pub fn save_ppm(path: &str, raster: &[egui::Color32], w: usize, h: usize) -> std::io::Result<()> {
+        let mut bytes = format!("P6\n{w} {h}\n255\n").into_bytes();
+        for pixel in raster {
+            bytes.push(pixel.r());
+            bytes.push(pixel.g());
+            bytes.push(pixel.b());
+        }
+        std::fs::write(path, bytes)
+    }
+    
+    pub fn load_ppm(path: &str) -> Option<(Vec<egui::Color32>, usize, usize)> {
+        let data = std::fs::read(path).ok()?;
+        let mut fields: Vec<String> = Vec::new();
+        let mut offset = 0;
+        while fields.len() < 4 && offset < data.len() {
+            while offset < data.len() && data[offset].is_ascii_whitespace() {
+                offset += 1;
+            }
+            let start = offset;
+            while offset < data.len() && !data[offset].is_ascii_whitespace() {
+                offset += 1;
+            }
+            fields.push(String::from_utf8_lossy(&data[start..offset]).to_string());
+        }
+        if fields.first().map(String::as_str) != Some("P6") {
+            return None;
+        }
+        let w: usize = fields.get(1)?.parse().ok()?;
+        let h: usize = fields.get(2)?.parse().ok()?;
+        offset += 1;
+        let pixels: Vec<egui::Color32> = data[offset..]
+            .chunks_exact(3)
+            .take(w * h)
+            .map(|chunk| egui::Color32::from_rgb(chunk[0], chunk[1], chunk[2]))
+            .collect();
+        if pixels.len() != w * h {
+            return None;
+        }
+        Some((pixels, w, h))
+    }
+}
+rust widget toolbar {
+    
+    let tools = [
+        ("карандаш", "✏"),
+        ("кисть", "🖌"),
+        ("ластик", ""),
+        ("линия", ""),
+        ("прямоугольник", ""),
+        ("овал", ""),
+        ("текст", "A"),
+        ("заливка", ""),
+    ];
+    ui.horizontal(|ui| {
+        for (index, (name, icon)) in tools.iter().enumerate() {
+            let key = format!("{}", index + 1);
+            if shortcut(ui, &key) {
+                state.tool = name.to_string();
+            }
+            let label = if icon.is_empty() {
+                name.to_string()
+            } else {
+                format!("{} {}", icon, name)
+            };
+            if ui
+                .selectable_label(state.tool == *name, label)
+                .on_hover_text(format!("клавиша {}", key))
+                .clicked()
+            {
+                state.tool = name.to_string();
+            }
+        }
+    });
+}
+rust widget palette {
+    
+    let colors = [
+        ("#1b1f24", "чёрный"),
+        ("#e5484d", "красный"),
+        ("#f2751f", "оранжевый"),
+        ("#e3b341", "жёлтый"),
+        ("#39d353", "зелёный"),
+        ("#388bfd", "синий"),
+        ("#a371f7", "сиреневый"),
+        ("#8b949e", "серый"),
+    ];
+    ui.horizontal(|ui| {
+        for (hex, name) in colors {
+            let picked = state.color.eq_ignore_ascii_case(hex);
+            let text = if picked { format!("• {}", name) } else { name.to_string() };
+            if ui
+                .button(egui::RichText::new(text).color(hex_color(hex)))
+                .on_hover_text(hex)
+                .clicked()
+            {
+                state.color = hex.to_string();
+            }
+        }
+    });
+}
+rust widget actions {
+    
+    // Диалог работает в фоне: проверяем, не вернул ли он путь.
+    if let Some(receiver) = state.dialog.take() {
+        match receiver.try_recv() {
+            Ok(path) => {
+                if path.is_empty() {
+                    state.status = "диалог отменён".to_string();
+                } else if state.dialog_kind == "save" {
+                    let name = if path.ends_with(".ppm") {
+                        path.clone()
+                    } else {
+                        format!("{path}.ppm")
+                    };
+                    match save_ppm(&name, &state.raster, state.raster_w, state.raster_h) {
+                        Ok(()) => {
+                            state.file = name.clone();
+                            state.status = format!("сохранено: {name}");
+                        }
+                        Err(err) => state.status = format!("не сохранилось: {err}"),
+                    }
+                } else {
+                    match load_ppm(&path) {
+                        Some((pixels, w, h)) => {
+                            state.undo.push(Snapshot {
+                                strokes: state.strokes.clone(),
+                                raster: state.raster.clone(),
+                            });
+                            state.strokes.clear();
+                            state.raster = pixels;
+                            state.raster_w = w;
+                            state.raster_h = h;
+                            state.texture = None;
+                            state.dirty = true;
+                            state.file = path.clone();
+                            state.status = format!("открыто: {path} ({w}x{h})");
+                        }
+                        None => state.status = format!("не похоже на PPM: {path}"),
+                    }
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => state.dialog = Some(receiver),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                state.status = "диалог закрыт без выбора".to_string();
+            }
+        }
+    }
+    
+    if shortcut(ui, "ctrl+z") || ui.button("↩ Отменить").on_hover_text("Ctrl+Z").clicked() {
+        if let Some(previous) = state.undo.pop() {
+            state.strokes = previous.strokes;
+            state.raster = previous.raster;
+            state.texture = None;
+            state.dirty = true;
+            state.status = "отменено".to_string();
+        }
+    }
+    if ui.button("💾 Сохранить").on_hover_text("Ctrl+S").clicked() || shortcut(ui, "ctrl+s") {
+        match pick_file(true, &state.file) {
+            Some(receiver) => {
+                state.dialog = Some(receiver);
+                state.dialog_kind = "save".to_string();
+                state.status = "выберите файл для сохранения".to_string();
+            }
+            None => state.status = "нет zenity/kdialog: системный диалог недоступен".to_string(),
+        }
+    }
+    if ui.button("📂 Открыть").on_hover_text("Ctrl+O / F7").clicked() || shortcut(ui, "ctrl+o") || shortcut(ui, "f7") {
+        match pick_file(false, &state.file) {
+            Some(receiver) => {
+                state.dialog = Some(receiver);
+                state.dialog_kind = "open".to_string();
+                state.status = "выберите файл".to_string();
+            }
+            None => state.status = "нет zenity/kdialog: системный диалог недоступен".to_string(),
+        }
+    }
+    if shortcut(ui, "f5") || shortcut(ui, "ctrl+shift+s") || ui.button("💾 Записать по пути").on_hover_text("F5").clicked() {
+        match save_ppm(&state.file, &state.raster, state.raster_w, state.raster_h) {
+            Ok(()) => state.status = format!("записано: {}", state.file),
+            Err(err) => state.status = format!("не записалось: {err}"),
+        }
+    }
+    if shortcut(ui, "f6") || shortcut(ui, "ctrl+shift+o") || ui.button("📂 Прочитать по пути").on_hover_text("F6").clicked() {
+        match load_ppm(&state.file) {
+            Some((pixels, w, h)) => {
+                state.undo.push(Snapshot { strokes: state.strokes.clone(), raster: state.raster.clone() });
+                state.strokes.clear();
+                state.raster = pixels;
+                state.raster_w = w;
+                state.raster_h = h;
+                state.texture = None;
+                state.dirty = true;
+                state.status = format!("прочитано: {} ({w}x{h})", state.file);
+            }
+            None => state.status = format!("не прочитать как PPM: {}", state.file),
+        }
+    }
+    if ui.button("🗑 Очистить").on_hover_text("Ctrl+N").clicked() || shortcut(ui, "ctrl+n") {
+        state.undo.push(Snapshot {
+            strokes: state.strokes.clone(),
+            raster: state.raster.clone(),
+        });
+        state.strokes.clear();
+        if !state.raster.is_empty() {
+            state.raster = vec![egui::Color32::WHITE; state.raster.len()];
+        }
+        state.texture = None;
+        state.dirty = true;
+        state.status = "холст очищен".to_string();
+    }
+}
+rust widget canvas {
+    
+    let size = egui::vec2(836.0, 420.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+    let painter = ui.painter_at(rect);
+    let w = rect.width().round().max(1.0) as usize;
+    let h = rect.height().round().max(1.0) as usize;
+    
+    if state.raster_w != w || state.raster_h != h || state.raster.is_empty() {
+        state.raster = vec![egui::Color32::WHITE; w * h];
+        state.raster_w = w;
+        state.raster_h = h;
+        state.texture = None;
+        state.dirty = true;
+    }
+    
+    if state.dirty || state.texture.is_none() {
+        let image = egui::ColorImage::new([w, h], state.raster.clone());
+        match state.texture.as_mut() {
+            Some(texture) => texture.set(image, egui::TextureOptions::NEAREST),
+            None => {
+                state.texture = Some(ui.ctx().load_texture("canvas", image, egui::TextureOptions::NEAREST));
+            }
+        }
+        state.dirty = false;
+    }
+    if let Some(texture) = &state.texture {
+        painter.image(
+            texture.id(),
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
+    painter.rect_stroke(
+        rect,
+        2.0,
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(190, 195, 205)),
+        egui::StrokeKind::Inside,
+    );
+    
+    let tool = state.tool.clone();
+    let color = hex_color(&state.color);
+    let width = state.size;
+    let kind = match tool.as_str() {
+        "карандаш" => 0,
+        "кисть" => 1,
+        "ластик" => 2,
+        "линия" => 3,
+        "прямоугольник" => 4,
+        "овал" => 5,
+        "текст" => 6,
+        _ => 7,
+    };
+    let local = |pos: egui::Pos2| (pos - rect.min).to_pos2();
+    let ink = if kind == 2 { egui::Color32::WHITE } else { color };
+    
+    let snapshot = |state: &mut State| {
+        state.undo.push(Snapshot {
+            strokes: state.strokes.clone(),
+            raster: state.raster.clone(),
+        });
+        if state.undo.len() > 12 {
+            state.undo.remove(0);
+        }
+    };
+    
+    if response.drag_started() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            if kind <= 5 {
+                snapshot(state);
+                state.strokes.push(Stroke::new(kind, ink, width, local(pos)));
+            }
+        }
+    }
+    if response.dragged() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let p = local(pos);
+            let last = state.strokes.len().saturating_sub(1);
+            if let Some(stroke) = state.strokes.get_mut(last) {
+                if kind <= 2 {
+                    stroke.points.push(p);
+                } else if stroke.points.len() == 1 {
+                    stroke.points.push(p);
+                } else {
+                    stroke.points[1] = p;
+                }
+            }
+        }
+    }
+    if response.clicked() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let p = local(pos);
+            match kind {
+                6 => {
+                    snapshot(state);
+                    let mut stroke = Stroke::new(6, color, (state.size * 4.0).max(14.0), p);
+                    stroke.text = state.text.clone();
+                    state.strokes.push(stroke);
+                }
+                7 => {
+                    // Заливка: стены из всех штрихов, обход от точки клика.
+                    snapshot(state);
+                    let mut blocked = vec![false; w * h];
+                    for stroke in &state.strokes {
+                        let outline = stroke.outline();
+                        let radius = (stroke.width / 2.0).max(1.0);
+                        for pair in outline.windows(2) {
+                            stamp_line(&mut blocked, w, h, pair[0], pair[1], radius);
+                        }
+                        if outline.len() == 1 {
+                            stamp(&mut blocked, w, h, outline[0].x, outline[0].y, radius);
+                        }
+                    }
+                    let sx = (p.x.round() as i32).clamp(0, w as i32 - 1) as usize;
+                    let sy = (p.y.round() as i32).clamp(0, h as i32 - 1) as usize;
+                    let painted = flood(&blocked, w, h, (sx, sy), &mut state.raster, color);
+                    state.dirty = true;
+                    state.status = format!("залито пикселей: {painted}");
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    for stroke in &state.strokes {
+        stroke.draw(&painter);
+    }
+}
+rust widget status {
+    
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(format!(
+                "{} · {} · толщина {:.0} · штрихов {} · отмен {}",
+                state.tool, state.color, state.size, state.strokes.len(), state.undo.len()
+            ))
+            .size(12.0)
+            .color(egui::Color32::from_rgb(139, 148, 158)),
+        );
+        ui.label(
+            egui::RichText::new(format!("· {}", state.status))
+                .size(12.0)
+                .color(egui::Color32::from_rgb(105, 180, 255)),
+        );
+    });
+}
+theme dark accent:#388bfd round:8
+vbox {pad:10}
+  hbox
+    label "Краски" {size:20, bold}
+    space 14
+    custom toolbar
+  space 6
+  custom palette
+  space 6
+  hbox
+    custom actions
+    space 16
+    slider "толщина" -> size 1..40
+    space 12
+    text_input "надпись" -> text {grow}
+  space 6
+  hbox
+    label "файл" {color:#8b949e, size:12}
+    text_input "путь" -> file {grow}
+  space 8
+  custom canvas
+  space 4
+  custom status

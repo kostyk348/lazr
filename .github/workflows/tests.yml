@@ -51,6 +51,9 @@ jobs:
           test -f /tmp/ci-dash/dist/icon.svg
           test -f /tmp/ci-dash/dist/pult-debug.tar.gz
           grep -q 'Name=Пульт' /tmp/ci-dash/dist/pult.desktop
+      - name: рантайм live собирается и читает модель
+        run: |
+          cargo run -q -- live examples/live-demo.lazr --headless
       - name: S-выражения и пример Paint разбираются
         run: |
           cargo run -q -- lisp examples/paint.lisp > /tmp/paint.lazr

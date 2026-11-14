@@ -177,6 +177,24 @@ The source is `examples/paint.lisp`: about 300 lines, of which ~250 are the canv
   (custom status))
 ```
 
+## `lazr live` — the model is read while the app runs
+
+```console
+$ lazr live examples/live-demo.lazr
+```
+
+One runtime is built (a template, not generated per screen); it is then launched with the path to a model and
+re-reads the file whenever it changes: edit the model, the window changes, no rebuild. This is the first step
+towards "Rust is the HAL, everything else is a DSL".
+
+Supported today: window, states, `label`, `button`, `checkbox`, `text_input`, `slider`, `space`, `separator`,
+`vbox`, `hbox`, `grid`, `scroll`, `{size, bold, color}` styles, `{field}` interpolation.
+
+**Honest status:** hot reload is verified — an external edit changes the window (new rows and a green heading
+appeared without a rebuild). Button actions in the runtime are **not confirmed**: the counter did not change in
+the runs, so they cannot be called working. The generator (`lazr build`) does run actions correctly; the gap is
+in the runtime, and that is the next step.
+
 ## Install
 
 ```console

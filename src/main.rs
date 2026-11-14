@@ -17,9 +17,11 @@
 mod codegen;
 mod expr;
 mod lang;
+mod live;
 mod mcp;
 mod model;
 mod project;
+mod runtime;
 
 use std::path::PathBuf;
 
@@ -85,6 +87,7 @@ fn main() {
         Some("package") => cmd_package(&args[1..]),
         Some("verify") => cmd_verify(&args[1..]),
         Some("headless") => cmd_headless(&args[1..]),
+        Some("live") => cmd_live(&args[1..]),
         Some("lisp") => cmd_lisp(&args[1..]),
         Some("mcp") => mcp::serve(),
         Some("demo") => cmd_demo(),
@@ -112,6 +115,7 @@ fn print_help() {
   gen DIR                             перегенерировать app/
   build DIR                           cargo build --offline в app/
   headless DIR                        исполнить интерфейс один кадр без окна
+  live FILE [--headless]              рантайм: окно читает модель на ходу
   lisp FILE [--to DIR]                S-выражения → модель (и проект, если --to)
   mcp                                 MCP-сервер на stdin/stdout
   demo                                сквозная проверка на живом примере
@@ -402,6 +406,68 @@ fn cmd_headless(args: &[String]) -> i32 {
 }
 
 /// DSL: S-выражения → модель → проект. Rust остаётся HAL.
+
+/// Рантайм: окно читает модель и перечитывает её при изменении файла.
+fn cmd_live(args: &[String]) -> i32 {
+    let opts = Opts::parse(args);
+    let file = match opts.positional().first() {
+        Some(path) => PathBuf::from(path),
+        None => {
+            eprintln!("нужно: live FILE (модель form.lazr или .lisp)");
+            return 2;
+        }
+    };
+    // .lisp сначала переводим в строчную модель: рантайм читает её.
+    let model_path = if file.extension().map(|e| e == "lisp").unwrap_or(false) {
+        let source = match std::fs::read_to_string(&file) {
+            Ok(text) => text,
+            Err(err) => {
+                eprintln!("не прочитать {}: {err}", file.display());
+                return 2;
+            }
+        };
+        let screen = match lang::read(&source).and_then(|forms| lang::eval(&forms)) {
+            Ok(evaluated) => evaluated.screen,
+            Err(err) => {
+                eprintln!("{}: {}", err.message, err.hint);
+                return 1;
+            }
+        };
+        let rendered = model::render(&screen);
+        let path = file.with_extension("lazr");
+        if let Err(err) = std::fs::write(&path, rendered) {
+            eprintln!("не записать {}: {err}", path.display());
+            return 1;
+        }
+        path
+    } else {
+        file.clone()
+    };
+    let binary = match live::prepare(&model_path) {
+        Ok(binary) => binary,
+        Err(err) => {
+            eprintln!("{err}");
+            return 1;
+        }
+    };
+    let mut command = std::process::Command::new(&binary);
+    command.arg(&model_path);
+    if opts.has("headless") {
+        command.arg("--headless");
+    }
+    match command.status() {
+        Ok(status) if status.success() => 0,
+        Ok(status) => {
+            eprintln!("рантайм завершился с кодом {status}");
+            1
+        }
+        Err(err) => {
+            eprintln!("не запустить {}: {err}", binary.display());
+            1
+        }
+    }
+}
+
 fn cmd_lisp(args: &[String]) -> i32 {
     let opts = Opts::parse(args);
     let positional = opts.positional();

@@ -1,0 +1,21 @@
+window "Живая модель" 560x420
+state count int 0
+state limit int 5
+state name string "Аня"
+state agree bool false
+vbox
+  label "Нажатий: {count} из {limit}" {size:22, bold, color:#69b4ff}
+  hbox
+    button "Плюс" do count += 1 {icon:play}
+    button "Минус" do count -= 1
+    button "Сброс" do count = 0 {icon:refresh}
+  slider "порог" -> limit 1..20
+  checkbox "Согласен" -> agree
+  text_input "Имя" -> name {grow}
+  label "Привет, {name}" {color:#8b949e}
+  separator
+  grid 2
+    label "счётчик"
+    label "{count}"
+    label "порог"
+    label "{limit}"
