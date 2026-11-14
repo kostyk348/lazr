@@ -1373,7 +1373,7 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
                 ui.label(
                     egui::RichText::new(hint)
                         .size(12.0)
-                        .color(egui::Color32::from_gray(130)),
+                        .color(egui::Color32::from_gray(160)),
                 );
             } else {
                 let mut remove_at = None;

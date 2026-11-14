@@ -351,6 +351,21 @@ fn apply_theme(ctx: &egui::Context) {{
     let font = {};
     ctx.all_styles_mut(|style| {{
         style.visuals = if dark {{ egui::Visuals::dark() }} else {{ egui::Visuals::light() }};
+        // Поле ввода рисуется цветом extreme_bg — он обязан отличаться от фона панели,
+        // иначе text_input невидим (проверено скриншотом демки «Задачи»).
+        style.visuals.extreme_bg_color = if dark {{
+            egui::Color32::from_rgb(24, 28, 36)
+        }} else {{
+            egui::Color32::from_rgb(248, 249, 251)
+        }};
+        style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(
+            1.0,
+            if dark {{
+                egui::Color32::from_rgb(58, 66, 80)
+            }} else {{
+                egui::Color32::from_rgb(205, 210, 218)
+            }},
+        );
         style.visuals.selection.bg_fill = accent;
         style.visuals.selection.stroke = egui::Stroke::new(1.0, on_accent);
         style.visuals.hyperlink_color = accent;
@@ -715,7 +730,7 @@ fn emit_widget(
                 widget.text.clone()
             };
             out.push_str(&format!(
-                "{pad}if state.{field}.is_empty() {{\n{pad}    ui.label(egui::RichText::new({}).size(12.0).color(egui::Color32::from_gray(130)));\n{pad}}} else {{\n{pad}    let rows = state.{field}.clone();\n{pad}    for (i, item) in rows.iter().enumerate() {{\n{pad}        ui.horizontal(|ui| {{\n{pad}            ui.label(item);\n{pad}            if ui.small_button(\"✖\").clicked() && i < state.{field}.len() {{\n{pad}                state.{field}.remove(i);\n{pad}            }}\n{pad}        }});\n{pad}    }}\n{pad}}}\n",
+                "{pad}if state.{field}.is_empty() {{\n{pad}    ui.label(egui::RichText::new({}).size(12.0).color(egui::Color32::from_gray(160)));\n{pad}}} else {{\n{pad}    let rows = state.{field}.clone();\n{pad}    for (i, item) in rows.iter().enumerate() {{\n{pad}        ui.horizontal(|ui| {{\n{pad}            ui.label(item);\n{pad}            if ui.small_button(\"✖\").clicked() && i < state.{field}.len() {{\n{pad}                state.{field}.remove(i);\n{pad}            }}\n{pad}        }});\n{pad}    }}\n{pad}}}\n",
                 rust_string(&empty_text)
             ));
         }
