@@ -30,9 +30,61 @@ strip = true
     )
 }
 
+/// Кириллица → латиница: иначе русский заголовок даёт пакет «app» у всех.
+fn transliterate(text: &str) -> String {
+    let mut out = String::new();
+    for ch in text.chars() {
+        // to_ascii_lowercase не трогает кириллицу — нужен юникодный вариант.
+        let lower = ch.to_lowercase().next().unwrap_or(ch);
+        let mapped: &str = match lower {
+            'а' => "a",
+            'б' => "b",
+            'в' => "v",
+            'г' => "g",
+            'д' => "d",
+            'е' | 'ё' => "e",
+            'ж' => "zh",
+            'з' => "z",
+            'и' => "i",
+            'й' => "y",
+            'к' => "k",
+            'л' => "l",
+            'м' => "m",
+            'н' => "n",
+            'о' => "o",
+            'п' => "p",
+            'р' => "r",
+            'с' => "s",
+            'т' => "t",
+            'у' => "u",
+            'ф' => "f",
+            'х' => "h",
+            'ц' => "c",
+            'ч' => "ch",
+            'ш' => "sh",
+            'щ' => "sch",
+            'ъ' | 'ь' => "",
+            'ы' => "y",
+            'э' => "e",
+            'ю' => "yu",
+            'я' => "ya",
+            other => {
+                if other.is_ascii_alphanumeric() {
+                    out.push(other);
+                } else {
+                    out.push('-');
+                }
+                continue;
+            }
+        };
+        out.push_str(mapped);
+    }
+    out
+}
+
 pub fn crate_name(text: &str) -> String {
-    // Cargo принимает только ASCII: кириллица из заголовка в имя пакета не идёт.
-    let cleaned: String = text
+    // Cargo принимает только ASCII: кириллицу транслитерируем, остальное — в дефис.
+    let cleaned: String = transliterate(text)
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() {
@@ -947,7 +999,13 @@ checkbox "Согласен" -> agree
 
     #[test]
     fn crate_name_is_safe() {
-        assert_eq!(crate_name("Счётчик"), "app", "кириллица → дефолтное имя");
+        assert_eq!(
+            crate_name("Счётчик"),
+            "schetchik",
+            "кириллица транслитерируется"
+        );
+        assert_eq!(crate_name("Пульт"), "pult");
+        assert_eq!(crate_name("Краски"), "kraski");
         assert_eq!(crate_name("My App!"), "my-app");
         assert_eq!(crate_name("123go"), "app-123go");
     }

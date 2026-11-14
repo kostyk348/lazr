@@ -49,6 +49,7 @@ impl FieldType {
             FieldType::Str => "String",
         }
     }
+    #[allow(dead_code)]
     pub fn numeric(&self) -> bool {
         matches!(self, FieldType::Int | FieldType::Float)
     }
@@ -791,7 +792,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                 if kind.is_container() {
                     text_start = 1;
                 } else if matches!(kind, WidgetKind::Custom(_)) {
-                    text_start = 2;
+                    // у custom текст — это имя виджета, он уже разобран выше
                 } else {
                     match words.get(1) {
                         Some(candidate)

@@ -99,13 +99,14 @@ lazr mcp                   # то же самое для агента, по MCP
 
 ```console
 $ lazr package /tmp/paint --release
-бинарь: /tmp/paint/dist/paint
+бинарь: /tmp/paint/dist/kraski
 иконка: /tmp/paint/dist/icon.png
-ярлык:  /tmp/paint/dist/paint.desktop
-архив:  /tmp/paint/dist/paint-release.tar.gz
+ярлык:  /tmp/paint/dist/kraski.desktop
+архив:  /tmp/paint/dist/kraski-release.tar.gz
 ```
 
-В `dist/` ложатся бинарь, `icon.png` (из `docs/logo.svg` через `rsvg-convert`), ярлык `.desktop` с `Name` из
+Имя пакета берётся из заголовка модели: русский заголовок транслитерируется (`Краски` → `kraski`), а не
+превращается в безликое `app`. В `dist/` ложатся бинарь, `icon.png` (из `docs/logo.svg` через `rsvg-convert`), ярлык `.desktop` с `Name` из
 заголовка модели и tar.gz. Установщика и подписи нет — это честная граница, а не забытая галочка.
 
 ## Проверка — три факта, а не обещание

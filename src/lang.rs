@@ -234,6 +234,8 @@ fn parse_atom(word: &str) -> Value {
 #[derive(Debug)]
 pub struct Evaluated {
     pub screen: Screen,
+    /// Значения, вычисленные формами верхнего уровня (def/set!), — для REPL.
+    #[allow(dead_code)]
     pub env: HashMap<String, Value>,
 }
 
