@@ -333,6 +333,12 @@ fn theme_code(screen: &Screen) -> String {
 fn apply_theme(ctx: &egui::Context) {{
     ctx.set_theme(egui::ThemePreference::{});
     let accent = {accent};
+    // Текст на акценте должен читаться: светлый акцент — тёмный текст и наоборот.
+    let on_accent = if accent.r() as u32 + accent.g() as u32 + accent.b() as u32 > 420 {{
+        egui::Color32::from_rgb(16, 18, 24)
+    }} else {{
+        egui::Color32::WHITE
+    }};
     let dark = {};
     let round = egui::CornerRadius::same({});
     let spacing = {};
@@ -340,7 +346,7 @@ fn apply_theme(ctx: &egui::Context) {{
     ctx.all_styles_mut(|style| {{
         style.visuals = if dark {{ egui::Visuals::dark() }} else {{ egui::Visuals::light() }};
         style.visuals.selection.bg_fill = accent;
-        style.visuals.selection.stroke = egui::Stroke::new(1.0, accent);
+        style.visuals.selection.stroke = egui::Stroke::new(1.0, on_accent);
         style.visuals.hyperlink_color = accent;
         style.visuals.widgets.noninteractive.corner_radius = round;
         style.visuals.widgets.inactive.corner_radius = round;
@@ -783,7 +789,6 @@ pub fn main_rs(screen: &Screen, _bin_name: &str) -> Result<String, String> {
 use eframe::egui;
 use eframe::egui::NumExt;
 {helpers}{theme}
-#[derive(Clone)]
 pub struct State {{
 {state_fields}}}
 
