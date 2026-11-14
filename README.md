@@ -189,6 +189,11 @@ $ lazr live examples/live-demo.lazr
 Сейчас в рантайме работают: окно, состояния, `label`, `button`, `checkbox`, `text_input`, `slider`, `space`,
 `separator`, `vbox`, `hbox`, `grid`, `scroll`, стили `{size, bold, color}`, подстановки `{field}`.
 
+Рантайм понимает и то, что раньше умел только генератор: `place` с абсолютными точками `at X Y`, размерами
+`size WxH` и якорями `anchor right bottom`; строку `theme` (тёмная/светлая основа, акцент, кегль, отступы,
+радиус); арифметику в действиях — `count = count + limit`, `limit = limit * 2`, `count -= count - 1`.
+Блоки `rust widget/fn/init` рантайм пропускает: это код генератора, не модели.
+
 Проверка без окна и без глаз:
 
 ```console

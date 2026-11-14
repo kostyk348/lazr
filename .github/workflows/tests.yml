@@ -66,6 +66,14 @@ jobs:
           cargo run -q -- live examples/live-demo.lazr --check | tee /tmp/live-check.txt
           grep -q 'count: 0 → 1' /tmp/live-check.txt
           grep -q 'check ok: действий 3' /tmp/live-check.txt
+      - name: место, тема и арифметика в рантайме
+        run: |
+          cargo run -q -- live examples/dashboard.lazr --check | tee /tmp/dash-check.txt
+          grep -q 'refreshed: 0 → 1' /tmp/dash-check.txt
+          cargo run -q -- live examples/dashboard.lazr --problems
+          printf 'window "a" 200x120\nstate x int 1\nstate k int 4\nvbox\n  button "b" do x = x + k\n' > /tmp/arith.lazr
+          cargo run -q -- live /tmp/arith.lazr --check | tee /tmp/arith-check.txt
+          grep -q 'x: 1 → 5' /tmp/arith-check.txt
       - name: S-выражения и пример Paint разбираются
         run: |
           cargo run -q -- lisp examples/paint.lisp > /tmp/paint.lazr

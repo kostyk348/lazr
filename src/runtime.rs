@@ -49,10 +49,38 @@ struct Node {
     color: Option<String>,
     size: Option<f32>,
     bold: bool,
+    /// Абсолютная точка внутри place.
+    at: Option<(f32, f32)>,
+    /// Размер блока (у place — размер самого места).
+    box_size: Option<(f32, f32)>,
+    /// Якорь: (справа, снизу).
+    anchor: (bool, bool),
     children: Vec<Node>,
 }
 
+#[derive(Clone, PartialEq)]
+struct Theme {
+    dark: bool,
+    accent: egui::Color32,
+    font: f32,
+    spacing: f32,
+    round: u8,
+}
+
+impl Default for Theme {
+    fn default() -> Theme {
+        Theme {
+            dark: true,
+            accent: egui::Color32::from_rgb(56, 139, 253),
+            font: 14.0,
+            spacing: 8.0,
+            round: 8,
+        }
+    }
+}
+
 struct Model {
+    theme: Theme,
     title: String,
     width: u32,
     height: u32,
@@ -87,6 +115,7 @@ fn parse_style(token: &str, node: &mut Node) {
 fn parse_model(text: &str) -> (Model, Vec<String>) {
     let mut problems: Vec<String> = Vec::new();
     let mut model = Model {
+        theme: Theme::default(),
         title: "Окно".into(),
         width: 520,
         height: 380,
@@ -99,9 +128,22 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
         "label", "button", "checkbox", "text_input", "slider", "space", "separator", "vbox", "hbox", "grid",
         "scroll", "place", "custom",
     ];
+    let mut in_rust = false;
     for (line_no, line) in text.lines().enumerate() {
         let trimmed = line.trim();
+        if in_rust {
+            if trimmed == "}" {
+                in_rust = false;
+            }
+            continue;
+        }
         if trimmed.is_empty() || trimmed.starts_with(';') {
+            continue;
+        }
+        if trimmed.starts_with("rust ") {
+            // код на Rust живёт в генераторе, не в рантайме
+            // «rust widget x {» открывает блок; закрывающая «}» придёт отдельной строкой
+            in_rust = !trimmed.ends_with('}');
             continue;
         }
         let depth = line.len() - line.trim_start().len();
@@ -136,7 +178,27 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                 model.fields.push((name, value));
                 continue;
             }
-            "theme" | "rust" => continue,
+            "theme" => {
+                for word in words.iter().skip(1) {
+                    let (key, value) = match word.split_once(':') {
+                        Some((key, value)) => (key, value),
+                        None => (word.as_str(), ""),
+                    };
+                    match key {
+                        "dark" => model.theme.dark = true,
+                        "light" => model.theme.dark = false,
+                        "accent" => model.theme.accent = hex_color(value),
+                        "font" => model.theme.font = value.parse().unwrap_or(model.theme.font),
+                        "spacing" => {
+                            model.theme.spacing = value.parse().unwrap_or(model.theme.spacing)
+                        }
+                        "round" => model.theme.round = value.parse().unwrap_or(model.theme.round),
+                        _ => {}
+                    }
+                }
+                continue;
+            }
+            "rust" => continue,
             _ => {
                 if !known.contains(&head.as_str()) && !problems.iter().any(|p| p.contains(&head)) {
                     problems.push(format!(
@@ -167,6 +229,16 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                 }
             }
         }
+        if head == "place" {
+            if let Some(first) = words.get(1) {
+                if let Some((w, h)) = first.split_once('x') {
+                    if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+                        node.box_size = Some((w, h));
+                        index = 2;
+                    }
+                }
+            }
+        }
         let mut i = index;
         while i < words.len() {
             let token = &words[i];
@@ -177,7 +249,12 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                 // Действие кончается там, где начинается стиль {…} или привязка ->.
                 let mut end = words.len();
                 for (offset, item) in words.iter().enumerate().skip(i + 1) {
-                    if item.starts_with('{') || item == "->" {
+                    if item.starts_with('{')
+                        || item == "->"
+                        || item == "at"
+                        || item == "size"
+                        || item == "anchor"
+                    {
                         end = offset;
                         break;
                     }
@@ -187,6 +264,41 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
             } else if token == "->" {
                 node.bind = words.get(i + 1).cloned();
                 i += 2;
+            } else if token == "at" {
+                let x = words.get(i + 1).and_then(|v| v.parse::<f32>().ok());
+                let y = words.get(i + 2).and_then(|v| v.parse::<f32>().ok());
+                if let (Some(x), Some(y)) = (x, y) {
+                    node.at = Some((x, y));
+                }
+                i += 3;
+            } else if token == "size" {
+                let raw = words.get(i + 1).cloned().unwrap_or_default();
+                if let Some((w, h)) = raw.split_once('x') {
+                    if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+                        node.box_size = Some((w, h));
+                    }
+                }
+                i += 2;
+            } else if token == "anchor" {
+                let mut right = false;
+                let mut bottom = false;
+                let mut step = 1;
+                for extra in words.iter().skip(i + 1) {
+                    match extra.as_str() {
+                        "right" => {
+                            right = true;
+                            step += 1;
+                        }
+                        "bottom" => {
+                            bottom = true;
+                            step += 1;
+                        }
+                        "left" | "top" | "center" => step += 1,
+                        _ => break,
+                    }
+                }
+                node.anchor = (right, bottom);
+                i += step;
             } else if let Ok(number) = token.parse::<f32>() {
                 node.number = Some(number);
                 i += 1;
@@ -366,7 +478,7 @@ fn run_effect(state: &mut HashMap<String, Value>, effect: &str) {
             continue;
         };
         let current = state.get(name).cloned().unwrap_or(Value::Int(0));
-        let delta: f32 = value.trim_start_matches('!').parse().unwrap_or(0.0);
+        let delta = eval_expr(state, value);
         let next = match (&current, kind, value) {
             (Value::Bool(flag), "=", "!bool") => Value::Bool(!flag),
             (Value::Text(_), "=", text) => Value::Text(unquote(text)),
@@ -383,6 +495,46 @@ fn run_effect(state: &mut HashMap<String, Value>, effect: &str) {
         };
         state.insert(name.to_string(), next);
     }
+}
+
+/// Арифметика в действиях: `count + 2`, `limit * 2`, число или имя поля.
+fn eval_expr(state: &HashMap<String, Value>, text: &str) -> f32 {
+    let text = text.trim();
+    if text.is_empty() {
+        return 0.0;
+    }
+    // сложение/вычитание — ищем последний оператор, чтобы разобрать «a + b - c»
+    let mut split_at = None;
+    for (index, ch) in text.char_indices() {
+        if (ch == '+' || ch == '-') && index > 0 {
+            split_at = Some(index);
+        }
+    }
+    if let Some(index) = split_at {
+        let left = eval_expr(state, &text[..index]);
+        let right = eval_expr(state, &text[index + 1..]);
+        return if text.as_bytes()[index] == b'+' {
+            left + right
+        } else {
+            left - right
+        };
+    }
+    // умножение/деление
+    if let Some((index, _)) = text
+        .char_indices()
+        .skip(1)
+        .find(|(_, ch)| *ch == '*' || *ch == '/')
+    {
+        let left = eval_expr(state, &text[..index]);
+        let right = eval_expr(state, &text[index + 1..]);
+        return match text.as_bytes()[index] {
+            b'*' => left * right,
+            _ if right.abs() > f32::EPSILON => left / right,
+            _ => 0.0,
+        };
+    }
+    let token = text.trim().trim_matches('"');
+    token.parse().unwrap_or_else(|_| number_of(state, token))
 }
 
 fn current_is_text(value: &Value) -> bool {
@@ -423,6 +575,51 @@ fn walk<'a>(nodes: &'a [Node]) -> Vec<&'a Node> {
         out.extend(walk(&node.children));
     }
     out
+}
+
+fn apply_theme(ctx: &egui::Context, theme: &Theme) {
+    ctx.set_theme(if theme.dark {
+        egui::ThemePreference::Dark
+    } else {
+        egui::ThemePreference::Light
+    });
+    let accent = theme.accent;
+    let on_accent = if accent.r() as u32 + accent.g() as u32 + accent.b() as u32 > 420 {
+        egui::Color32::from_rgb(16, 18, 24)
+    } else {
+        egui::Color32::WHITE
+    };
+    let dark = theme.dark;
+    let round = egui::CornerRadius::same(theme.round);
+    let spacing = theme.spacing;
+    let font = theme.font;
+    ctx.all_styles_mut(move |style| {
+        style.visuals = if dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
+        style.visuals.selection.bg_fill = accent;
+        style.visuals.selection.stroke = egui::Stroke::new(1.0, on_accent);
+        style.visuals.hyperlink_color = accent;
+        style.visuals.widgets.noninteractive.corner_radius = round;
+        style.visuals.widgets.inactive.corner_radius = round;
+        style.visuals.widgets.hovered.corner_radius = round;
+        style.visuals.widgets.active.corner_radius = round;
+        style.visuals.widgets.open.corner_radius = round;
+        style.spacing.item_spacing = egui::vec2(spacing, spacing);
+        style.spacing.button_padding = egui::vec2(spacing, spacing * 0.5);
+        for (text_style, size) in [
+            (egui::TextStyle::Body, font),
+            (egui::TextStyle::Button, font),
+            (egui::TextStyle::Heading, font * 1.4),
+            (egui::TextStyle::Small, font * 0.8),
+        ] {
+            style
+                .text_styles
+                .insert(text_style, egui::FontId::proportional(size));
+        }
+    });
 }
 
 fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>) {
@@ -520,6 +717,31 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
                     }
                 });
         }
+        "place" => {
+            let (cw, ch) = node.box_size.unwrap_or((600.0, 400.0));
+            let origin = ui.available_rect_before_wrap().min;
+            let canvas = egui::Rect::from_min_size(origin, egui::vec2(cw, ch));
+            for child in &node.children {
+                let (mut x, mut y) = child.at.unwrap_or((0.0, 0.0));
+                let (bw, bh) = child
+                    .box_size
+                    .unwrap_or((cw, if child.at.is_some() { 24.0 } else { ch }));
+                if child.anchor.0 {
+                    x = cw - bw - x;
+                }
+                if child.anchor.1 {
+                    y = ch - bh - y;
+                }
+                let rect = egui::Rect::from_min_size(
+                    canvas.min + egui::vec2(x, y),
+                    egui::vec2(bw, bh),
+                );
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                    draw_node(ui, child, state);
+                });
+            }
+            ui.advance_cursor_after_rect(canvas);
+        }
         "scroll" => {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for child in &node.children {
@@ -537,7 +759,7 @@ struct LiveApp {
     problems: Vec<String>,
     state: HashMap<String, Value>,
     modified: Option<SystemTime>,
-    themed: bool,
+    applied_theme: Option<Theme>,
 }
 
 impl LiveApp {
@@ -572,9 +794,10 @@ impl LiveApp {
 impl eframe::App for LiveApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.watch();
-        if !self.themed {
-            ui.ctx().set_theme(egui::ThemePreference::Dark);
-            self.themed = true;
+        let wanted = self.model.theme.clone();
+        if self.applied_theme.as_ref() != Some(&wanted) {
+            apply_theme(ui.ctx(), &wanted);
+            self.applied_theme = Some(wanted);
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(400));
         ui.label(
@@ -629,7 +852,7 @@ fn main() {
         problems,
         state,
         modified: std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
-        themed: false,
+        applied_theme: None,
     };
     if std::env::args().any(|arg| arg == "--problems") {
         // Машинная проверка модели: то же, что видно в красной плашке.

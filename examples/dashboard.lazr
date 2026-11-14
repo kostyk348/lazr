@@ -1,0 +1,39 @@
+window "Пульт" 820x560
+state demand int 17
+state capacity int 2
+state refreshed int 0
+rust widget card_demand {
+    
+    let ratio = (state.demand as f32 / state.capacity.max(1) as f32).min(9.9);
+    ui.label(egui::RichText::new("потребность / ёмкость").size(12.0).color(egui::Color32::from_rgb(139, 148, 158)));
+    ui.label(egui::RichText::new(format!("{:.1}×", ratio)).size(30.0).strong().color(egui::Color32::from_rgb(229, 72, 77)));
+    ui.label(egui::RichText::new(format!("{} задач на {} воркера", state.demand, state.capacity)).size(12.0));
+}
+theme dark accent:#388bfd round:8
+place 800x480
+  label "Пульт" at 16 10 size 200x28 {size:22, bold}
+  label "обновлено: {refreshed} раз" at 600 16 size 190x20 {color:#8b949e, size:12}
+  vbox at 16 50 size 240x170
+    custom card_demand
+  vbox at 272 50 size 240x170
+    label "ёмкость" {color:#8b949e, size:12}
+    label "{capacity}" {color:#39d353, size:30, bold}
+    label "воркеров в строю" {size:12}
+    space 6
+    slider "план" -> capacity 1..12
+  vbox at 528 50 size 240x170
+    label "потребность" {color:#8b949e, size:12}
+    label "{demand}" {color:#e8833c, size:30, bold}
+    label "задач в очереди" {size:12}
+    space 6
+    hbox
+      button "+1"
+      button "-1"
+  vbox at 16 236 size 752x120
+    label "журнал" {color:#8b949e, size:12}
+    separator
+    label "потребность {demand} · ёмкость {capacity}" {size:13}
+    label "пересчёт: {refreshed}" {color:#8b949e, size:13}
+  button "Пересчитать" do refreshed += 1 at 16 436 size 160x32 {key:ctrl+r, icon:refresh}
+  button "Очистить" do refreshed = 0 at 16 16 size 130x32 anchor right bottom {icon:delete}
+  label "F5 — пересчёт" at 16 54 size 200x20 anchor right bottom {color:#8b949e, size:11}

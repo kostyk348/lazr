@@ -190,6 +190,11 @@ towards "Rust is the HAL, everything else is a DSL".
 Supported today: window, states, `label`, `button`, `checkbox`, `text_input`, `slider`, `space`, `separator`,
 `vbox`, `hbox`, `grid`, `scroll`, `{size, bold, color}` styles, `{field}` interpolation.
 
+The runtime also understands what used to be generator-only: `place` with absolute `at X Y` points, `size WxH`
+boxes and `anchor right bottom`; the `theme` line (dark/light base, accent, font, spacing, radius); arithmetic in
+actions — `count = count + limit`, `limit = limit * 2`, `count -= count - 1`. Blocks `rust widget/fn/init` are
+skipped: that is generator code, not the model.
+
 Verification without a window and without eyeballs:
 
 ```console
