@@ -54,6 +54,13 @@ jobs:
       - name: рантайм live собирается и читает модель
         run: |
           cargo run -q -- live examples/live-demo.lazr --headless
+      - name: модель с ошибками отвергается с кодом 1
+        run: |
+          printf 'window "bad" 300x200\nvbox\n  frobnicator "нет"\n' > /tmp/bad.lazr
+          if cargo run -q -- live /tmp/bad.lazr --problems; then
+            echo "ожидали код 1 для модели с ошибкой"; exit 1
+          fi
+          cargo run -q -- live examples/live-demo.lazr --problems
       - name: действия в рантайме применяются (--check)
         run: |
           cargo run -q -- live examples/live-demo.lazr --check | tee /tmp/live-check.txt

@@ -84,7 +84,8 @@ fn parse_style(token: &str, node: &mut Node) {
     }
 }
 
-fn parse_model(text: &str) -> Model {
+fn parse_model(text: &str) -> (Model, Vec<String>) {
+    let mut problems: Vec<String> = Vec::new();
     let mut model = Model {
         title: "Окно".into(),
         width: 520,
@@ -94,7 +95,11 @@ fn parse_model(text: &str) -> Model {
     };
     // стек: (глубина, путь индексов в дереве)
     let mut stack: Vec<(usize, Vec<usize>)> = vec![(0, Vec::new())];
-    for line in text.lines() {
+    let known = [
+        "label", "button", "checkbox", "text_input", "slider", "space", "separator", "vbox", "hbox", "grid",
+        "scroll", "place", "custom",
+    ];
+    for (line_no, line) in text.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with(';') {
             continue;
@@ -132,7 +137,15 @@ fn parse_model(text: &str) -> Model {
                 continue;
             }
             "theme" | "rust" => continue,
-            _ => {}
+            _ => {
+                if !known.contains(&head.as_str()) && !problems.iter().any(|p| p.contains(&head)) {
+                    problems.push(format!(
+                        "строка {}: виджет «{}» рантайм не знает",
+                        line_no + 1,
+                        head
+                    ));
+                }
+            }
         }
         while stack.len() > 1 && stack.last().map(|(d, _)| *d >= depth).unwrap_or(false) {
             stack.pop();
@@ -193,7 +206,32 @@ fn parse_model(text: &str) -> Model {
             stack.push((depth, child_path));
         }
     }
-    model
+    // привязки и подстановки должны указывать на существующие поля
+    let names: Vec<String> = model.fields.iter().map(|(name, _)| name.clone()).collect();
+    for node in walk(&model.root) {
+        if let Some(bind) = &node.bind {
+            if !names.contains(bind) {
+                problems.push(format!("поле «{bind}» не объявлено в state"));
+            }
+        }
+        let mut rest = node.text.as_str();
+        while let Some(open) = rest.find('{') {
+            rest = &rest[open + 1..];
+            match rest.find('}') {
+                Some(close) => {
+                    let name = &rest[..close];
+                    if !names.contains(&name.to_string()) {
+                        problems.push(format!("в тексте подстановка «{{{name}}}» без поля"));
+                    }
+                    rest = &rest[close + 1..];
+                }
+                None => break,
+            }
+        }
+    }
+    problems.sort();
+    problems.dedup();
+    (model, problems)
 }
 
 /// Токены строки: кавычки и {стиль} держатся вместе.
@@ -496,6 +534,7 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
 struct LiveApp {
     path: String,
     model: Model,
+    problems: Vec<String>,
     state: HashMap<String, Value>,
     modified: Option<SystemTime>,
     themed: bool,
@@ -503,10 +542,15 @@ struct LiveApp {
 
 impl LiveApp {
     fn reload(&mut self) {
-        let Ok(text) = std::fs::read_to_string(&self.path) else {
-            return;
+        let text = match std::fs::read_to_string(&self.path) {
+            Ok(text) => text,
+            Err(err) => {
+                self.problems = vec![format!("не прочитать {}: {err}", self.path)];
+                return;
+            }
         };
-        let model = parse_model(&text);
+        let (model, problems) = parse_model(&text);
+        self.problems = problems;
         // сохраняем значения полей, которые уже были: перезагрузка не должна сбрасывать ввод
         let mut state = HashMap::new();
         for (name, value) in &model.fields {
@@ -541,6 +585,26 @@ impl eframe::App for LiveApp {
             .size(11.0)
             .color(egui::Color32::from_rgb(139, 148, 158)),
         );
+        if !self.problems.is_empty() {
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(48, 20, 22))
+                .inner_margin(8.0)
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("модель с замечаниями: {}", self.problems.len()))
+                            .strong()
+                            .color(egui::Color32::from_rgb(229, 72, 77)),
+                    );
+                    for problem in self.problems.iter().take(4) {
+                        ui.label(
+                            egui::RichText::new(format!("• {problem}"))
+                                .size(12.0)
+                                .color(egui::Color32::from_rgb(240, 180, 180)),
+                        );
+                    }
+                });
+            ui.add_space(6.0);
+        }
         ui.separator();
         for node in self.model.root.clone() {
             draw_node(ui, &node, &mut self.state);
@@ -551,7 +615,7 @@ impl eframe::App for LiveApp {
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| "form.lazr".to_string());
     let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let model = parse_model(&text);
+    let (model, problems) = parse_model(&text);
     let mut state = HashMap::new();
     for (name, value) in &model.fields {
         state.insert(name.clone(), value.clone());
@@ -562,10 +626,22 @@ fn main() {
     let mut app = LiveApp {
         path: path.clone(),
         model,
+        problems,
         state,
         modified: std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
         themed: false,
     };
+    if std::env::args().any(|arg| arg == "--problems") {
+        // Машинная проверка модели: то же, что видно в красной плашке.
+        for problem in &app.problems {
+            println!("{problem}");
+        }
+        println!("problems: {}", app.problems.len());
+        if !app.problems.is_empty() {
+            std::process::exit(1);
+        }
+        return;
+    }
     if std::env::args().any(|arg| arg == "--check") {
         // Проверка действий без окна: каждое действие применяется к состоянию,
         // печатается, какие поля изменились. Это и есть «функция работает».

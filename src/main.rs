@@ -115,7 +115,8 @@ fn print_help() {
   gen DIR                             перегенерировать app/
   build DIR                           cargo build --offline в app/
   headless DIR                        исполнить интерфейс один кадр без окна
-  live FILE [--headless] [--check]    рантайм: окно читает модель на ходу
+  live FILE [--headless|--check|--problems]
+                                      рантайм: окно читает модель на ходу
   lisp FILE [--to DIR]                S-выражения → модель (и проект, если --to)
   mcp                                 MCP-сервер на stdin/stdout
   demo                                сквозная проверка на живом примере
@@ -443,6 +444,26 @@ fn cmd_live(args: &[String]) -> i32 {
     } else {
         file.clone()
     };
+    if file.extension().map(|e| e == "lisp").unwrap_or(false) {
+        // Держим .lazr в актуальном виде: правишь .lisp — рантайм видит изменения.
+        let source = file.clone();
+        let rendered_path = model_path.clone();
+        std::thread::spawn(move || {
+            let mut stamp = std::fs::metadata(&source).and_then(|m| m.modified()).ok();
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                let now = std::fs::metadata(&source).and_then(|m| m.modified()).ok();
+                if now == stamp {
+                    continue;
+                }
+                stamp = now;
+                let Ok(text) = std::fs::read_to_string(&source) else { continue };
+                let Ok(forms) = lang::read(&text) else { continue };
+                let Ok(evaluated) = lang::eval(&forms) else { continue };
+                let _ = std::fs::write(&rendered_path, model::render(&evaluated.screen));
+            }
+        });
+    }
     let binary = match live::prepare(&model_path) {
         Ok(binary) => binary,
         Err(err) => {
@@ -457,6 +478,9 @@ fn cmd_live(args: &[String]) -> i32 {
     }
     if opts.has("check") {
         command.arg("--check");
+    }
+    if opts.has("problems") {
+        command.arg("--problems");
     }
     match command.status() {
         Ok(status) if status.success() => 0,

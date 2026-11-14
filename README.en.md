@@ -205,6 +205,13 @@ effect of the handlers the same way `lazr verify` verifies a generated app. In t
 separately: three clicks on "Plus" give "Clicks: 3 of 5", and an external edit changes the window without a
 rebuild.
 
+A broken model does not kill the window: the runtime shows a red panel with the findings ("line 5: widget
+"frobnicator" is unknown to the runtime", "field "missing" is not declared in state"), and `--problems` prints them
+machine-readably and exits with code 1 — CI checks that.
+
+You can edit `.lisp` too: `lazr live model.lisp` keeps the converted model up to date, so S-expression edits are
+picked up without a rebuild (verified: changing the heading in `.lisp` changes the window).
+
 What the runtime does not have yet: `custom` widgets and `place` (they need code generation), and complex action
 expressions — the runtime understands assignment, `+=`/`-=`, `!bool`, strings and a single-branch `if`.
 
