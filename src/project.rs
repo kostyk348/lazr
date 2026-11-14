@@ -94,11 +94,24 @@ impl Project {
         PathBuf::from(home).join(".cache/lazr/target")
     }
 
+    /// Сеть не нужна по умолчанию: `--offline` быстрее и детерминированнее.
+    /// `LAZR_NET=1` отключает это — для чистого реестра (CI, первый запуск).
+    fn offline_flag() -> Option<&'static str> {
+        if std::env::var("LAZR_NET").as_deref() == Ok("1") {
+            None
+        } else {
+            Some("--offline")
+        }
+    }
+
     pub fn build(&self) -> Result<String, String> {
         self.generate()?;
-        let output = Command::new("cargo")
-            .arg("build")
-            .arg("--offline")
+        let mut command = Command::new("cargo");
+        command.arg("build");
+        if let Some(flag) = Self::offline_flag() {
+            command.arg(flag);
+        }
+        let output = command
             .env("CARGO_TARGET_DIR", self.target_dir())
             .current_dir(self.app_dir())
             .output()
@@ -129,9 +142,11 @@ impl Project {
         if release {
             args.push("--release".to_string());
         }
+        if let Some(flag) = Self::offline_flag() {
+            args.push(flag.to_string());
+        }
         let output = Command::new("cargo")
             .args(&args)
-            .arg("--offline")
             .env("CARGO_TARGET_DIR", self.target_dir())
             .current_dir(self.app_dir())
             .output()

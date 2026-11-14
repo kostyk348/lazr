@@ -42,6 +42,8 @@ jobs:
           grep -q 'UiBuilder::new().max_rect' /tmp/ci-dash/app/src/main.rs
       - name: упаковка собирает dist
         run: |
+          # в CI реестр пустой: сначала тянем зависимости, потом собираем офлайн
+          cargo fetch --manifest-path /tmp/ci-dash/app/Cargo.toml || cargo fetch --manifest-path /tmp/ci-dash/app/Cargo.toml
           cargo run -q -- package /tmp/ci-dash
           test -f /tmp/ci-dash/dist/app.desktop
           test -f /tmp/ci-dash/dist/icon.svg
