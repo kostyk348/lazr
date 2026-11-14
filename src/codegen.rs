@@ -17,7 +17,7 @@ edition = "2021"
 # Сгенерировано lazr. Модель экрана — form.lazr; правьте её, а не этот файл.
 [dependencies]
 eframe = {{ version = "{EGUI_VERSION}", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }}
-egui = "{EGUI_VERSION}"
+egui = {{ version = "{EGUI_VERSION}", features = ["monochrome_emoji_fonts"] }}
 
 [[bin]]
 name = "{bin_name}"
@@ -170,45 +170,39 @@ fn color_code(color: &str) -> Option<String> {
 
 /// Иконки: имена → глифы, которые есть в шрифтах egui по умолчанию.
 pub fn icon_glyph(name: &str) -> Option<&'static str> {
+    // Только глифы, которые есть в шрифтах egui (emoji-icon-font + NotoEmoji):
+    // проверено кадром — стрелки и геометрические фигуры там дают «тофу».
     const ICONS: &[(&str, &str)] = &[
         ("save", "💾"),
         ("open", "📂"),
         ("new", "➕"),
         ("delete", "🗑"),
-        ("undo", "↩"),
-        ("redo", "↪"),
+        ("undo", "↻"),
+        ("redo", "⏩"),
         ("pencil", "✏"),
         ("brush", "🖌"),
-        ("eraser", "◻"),
-        ("line", "╱"),
-        ("rect", "▭"),
-        ("ellipse", "◯"),
-        ("text", "A"),
-        ("fill", "▣"),
         ("cut", "✂"),
         ("copy", "⧉"),
         ("paste", "📋"),
         ("search", "🔍"),
         ("settings", "⚙"),
-        ("play", "▶"),
+        ("play", "⏵"),
+        ("pause", "⏸"),
         ("stop", "⏹"),
-        ("refresh", "⟳"),
-        ("check", "✓"),
-        ("close", "✕"),
-        ("up", "↑"),
-        ("down", "↓"),
-        ("left", "←"),
-        ("right", "→"),
-        ("home", "⌂"),
+        ("prev", "⏮"),
+        ("next", "⏭"),
+        ("check", "✔"),
+        ("close", "✖"),
         ("star", "★"),
         ("heart", "♥"),
-        ("info", "ℹ"),
         ("warn", "⚠"),
-        ("file", "🗎"),
+        ("info", "ℹ"),
+        ("file", "🗐"),
         ("folder", "🗀"),
         ("print", "🖶"),
-        ("zoom-in", "＋"),
-        ("zoom-out", "－"),
+        ("plus", "➕"),
+        ("minus", "➖"),
+        ("text", "A"),
     ];
     ICONS
         .iter()
@@ -270,6 +264,58 @@ fn key_table() -> String {
         out.push_str(&format!("        (\"{name}\", egui::Key::{key}),\n"));
     }
     out
+}
+
+/// Функция темы: основа, акцент, шрифт, отступы, скругления.
+///
+/// В egui 0.37 стиль живёт по темам, поэтому правим сразу все через all_styles_mut.
+fn theme_code(screen: &Screen) -> String {
+    let theme = &screen.theme;
+    let accent = theme
+        .accent
+        .as_deref()
+        .and_then(color_code)
+        .unwrap_or_else(|| "egui::Color32::from_rgb(56, 139, 253)".to_string());
+    format!(
+        r#"
+fn apply_theme(ctx: &egui::Context) {{
+    ctx.set_theme(egui::ThemePreference::{});
+    let accent = {accent};
+    let dark = {};
+    let round = egui::CornerRadius::same({});
+    let spacing = {};
+    let font = {};
+    ctx.all_styles_mut(|style| {{
+        style.visuals = if dark {{ egui::Visuals::dark() }} else {{ egui::Visuals::light() }};
+        style.visuals.selection.bg_fill = accent;
+        style.visuals.selection.stroke = egui::Stroke::new(1.0, accent);
+        style.visuals.hyperlink_color = accent;
+        style.visuals.widgets.noninteractive.corner_radius = round;
+        style.visuals.widgets.inactive.corner_radius = round;
+        style.visuals.widgets.hovered.corner_radius = round;
+        style.visuals.widgets.active.corner_radius = round;
+        style.visuals.widgets.open.corner_radius = round;
+        style.spacing.item_spacing = egui::vec2(spacing, spacing);
+        style.spacing.button_padding = egui::vec2(spacing, spacing * 0.5);
+        for (text_style, size) in [
+            (egui::TextStyle::Body, font),
+            (egui::TextStyle::Button, font),
+            (egui::TextStyle::Heading, font * 1.4),
+            (egui::TextStyle::Small, font * 0.8),
+        ] {{
+            style
+                .text_styles
+                .insert(text_style, egui::FontId::proportional(size));
+        }}
+    }});
+}}
+"#,
+        if theme.dark { "Dark" } else { "Light" },
+        if theme.dark { "true" } else { "false" },
+        theme.round,
+        float_lit(theme.spacing),
+        float_lit(theme.font)
+    )
 }
 
 fn shortcut_helpers() -> String {
@@ -549,6 +595,40 @@ fn emit_widget(
                 "{pad}egui::ScrollArea::vertical().show(ui, |ui| {{\n{body}{pad}}});\n"
             ));
         }
+        WidgetKind::Place => {
+            let (cw, ch) = widget.box_size.unwrap_or((600.0, 400.0));
+            let id = emit.counter;
+            emit.counter += 1;
+            out.push_str(&format!(
+                "{pad}// place: абсолютные координаты и якоря\n{pad}let canvas_{id} = egui::Rect::from_min_size(\n{pad}    ui.available_rect_before_wrap().min,\n{pad}    egui::vec2({}, {}),\n{pad});\n",
+                float_lit(cw),
+                float_lit(ch)
+            ));
+            for child in &widget.children {
+                let (mut x, mut y) = child.at.unwrap_or((0.0, 0.0));
+                let (bw, bh) = child
+                    .box_size
+                    .unwrap_or((cw, if child.at.is_some() { 24.0 } else { ch }));
+                if child.anchor.0 {
+                    x = cw - bw - x;
+                }
+                if child.anchor.1 {
+                    y = ch - bh - y;
+                }
+                let body = emit_widget(child, screen, depth + 2, emit)?;
+                let body = reindent(&body, 2);
+                out.push_str(&format!(
+                    "{pad}ui.scope_builder(\n{pad}    egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(\n{pad}        canvas_{id}.min + egui::vec2({}, {}),\n{pad}        egui::vec2({}, {}),\n{pad}    )),\n{pad}    |ui| {{\n{body}{pad}    }},\n{pad});\n",
+                    float_lit(x),
+                    float_lit(y),
+                    float_lit(bw),
+                    float_lit(bh)
+                ));
+            }
+            out.push_str(&format!(
+                "{pad}ui.advance_cursor_after_rect(canvas_{id});\n"
+            ));
+        }
         WidgetKind::Custom(name) => {
             out.push_str(&format!("{pad}widget_{name}(state, ui);\n"));
         }
@@ -650,8 +730,7 @@ pub fn main_rs(screen: &Screen, _bin_name: &str) -> Result<String, String> {
 
 use eframe::egui;
 use eframe::egui::NumExt;
-{helpers}
-
+{helpers}{theme}
 #[derive(Clone)]
 pub struct State {{
 {state_fields}}}
@@ -676,10 +755,15 @@ impl State {{
 
 struct App {{
     state: State,
+    themed: bool,
 }}
 
 impl eframe::App for App {{
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {{
+        if !self.themed {{
+            apply_theme(ui.ctx());
+            self.themed = true;
+        }}
         draw(&mut self.state, ui);
     }}
 }}
@@ -698,6 +782,7 @@ fn main() {{
     }}
     if std::env::args().any(|arg| arg == "--headless") {{
         let ctx = egui::Context::default();
+        apply_theme(&ctx);
         let mut state = State::new();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {{
             draw(&mut state, ui);
@@ -720,12 +805,13 @@ fn main() {{
     let _ = eframe::run_native(
         {title},
         options,
-        Box::new(|_cc| Ok(Box::new(App {{ state: State::new() }}))),
+        Box::new(|_cc| Ok(Box::new(App {{ state: State::new(), themed: false }}))),
     );
 }}
 "#,
         count = count_widgets(&screen.root),
         helpers = shortcut_helpers(),
+        theme = theme_code(screen),
         actions_code = actions_code,
         actions_table = actions_table,
         actions_count = actions_count,
@@ -829,6 +915,34 @@ checkbox "Согласен" -> agree
         let screen = parse("state name string \"\"\ntext_input \"Имя\" -> name {grow}\n").unwrap();
         let code = main_rs(&screen, "app").unwrap();
         assert!(code.contains("add_sized"), "{code}");
+    }
+
+    #[test]
+    fn place_positions_children_and_flips_anchors() {
+        let screen = parse(
+            "place 300x200\n  label \"a\" at 10 20 size 100x24\n  label \"b\" anchor right bottom at 8 8 size 90x30\n",
+        )
+        .unwrap();
+        let code = main_rs(&screen, "app").unwrap();
+        assert!(code.contains("egui::UiBuilder::new().max_rect"), "{code}");
+        assert!(code.contains("egui::vec2(10.0, 20.0)"), "{code}");
+        // 300 - 90 - 8 = 202, 200 - 30 - 8 = 162
+        assert!(
+            code.contains("egui::vec2(202.0, 162.0)"),
+            "якорь не пересчитан: {code}"
+        );
+        assert!(code.contains("advance_cursor_after_rect"), "{code}");
+    }
+
+    #[test]
+    fn theme_becomes_apply_theme() {
+        let screen = parse("theme light accent:#39d353 font:16 spacing:12 round:10\n").unwrap();
+        let code = main_rs(&screen, "app").unwrap();
+        assert!(code.contains("fn apply_theme"), "{code}");
+        assert!(code.contains("ThemePreference::Light"), "{code}");
+        assert!(code.contains("from_rgb(57, 211, 83)"), "{code}");
+        assert!(code.contains("CornerRadius::same(10)"), "{code}");
+        assert!(code.contains("let font = 16.0;"), "шрифт из темы: {code}");
     }
 
     #[test]

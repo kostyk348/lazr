@@ -82,6 +82,7 @@ fn main() {
         Some("show") => cmd_show(&args[1..]),
         Some("gen") => cmd_gen(&args[1..]),
         Some("build") => cmd_build(&args[1..]),
+        Some("package") => cmd_package(&args[1..]),
         Some("verify") => cmd_verify(&args[1..]),
         Some("headless") => cmd_headless(&args[1..]),
         Some("lisp") => cmd_lisp(&args[1..]),
@@ -324,6 +325,36 @@ fn cmd_build(args: &[String]) -> i32 {
 }
 
 /// Проверка собранной программы: компиляция, кадр без окна, вызов всех действий.
+
+/// Упаковка в dist/: бинарь, иконка, ярлык .desktop и tar.gz.
+fn cmd_package(args: &[String]) -> i32 {
+    let opts = Opts::parse(args);
+    let dir = match dir_of(&opts, 0) {
+        Ok(dir) => dir,
+        Err(code) => return code,
+    };
+    let project = match Project::load(&dir) {
+        Ok(project) => project,
+        Err(err) => {
+            eprintln!("{err}");
+            return 1;
+        }
+    };
+    let release = opts.has("release");
+    match project.package(release) {
+        Ok(lines) => {
+            for line in lines {
+                println!("{line}");
+            }
+            0
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            1
+        }
+    }
+}
+
 fn cmd_verify(args: &[String]) -> i32 {
     let opts = Opts::parse(args);
     let dir = match dir_of(&opts, 0) {

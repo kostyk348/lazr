@@ -132,15 +132,17 @@ pub fn hex_color(text: &str) -> egui::Color32 {
 """)
 
 (rust-widget toolbar """
+// Иконки только из проверенного набора egui: у геометрических фигур
+// подходящего глифа в шрифтах нет, поэтому они подписаны словами.
 let tools = [
     ("карандаш", "✏"),
     ("кисть", "🖌"),
-    ("ластик", "◻"),
-    ("линия", "╱"),
-    ("прямоугольник", "▭"),
-    ("овал", "◯"),
+    ("ластик", ""),
+    ("линия", ""),
+    ("прямоугольник", ""),
+    ("овал", ""),
     ("текст", "A"),
-    ("заливка", "▣"),
+    ("заливка", ""),
 ];
 ui.horizontal(|ui| {
     for (index, (name, icon)) in tools.iter().enumerate() {
@@ -149,7 +151,14 @@ ui.horizontal(|ui| {
             state.tool = name.to_string();
         }
         if ui
-            .selectable_label(state.tool == *name, format!("{} {}", icon, name))
+            .selectable_label(
+                state.tool == *name,
+                if icon.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{} {}", icon, name)
+                },
+            )
             .on_hover_text(format!("клавиша {}", key))
             .clicked()
         {

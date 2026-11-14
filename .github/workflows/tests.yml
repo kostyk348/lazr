@@ -31,6 +31,22 @@ jobs:
           grep -q 'fn shortcut' /tmp/ci-app/app/src/main.rs
           grep -q 'if shortcut(ui, "ctrl+s")' /tmp/ci-app/app/src/main.rs
           grep -q '💾' /tmp/ci-app/app/src/main.rs
+      - name: place, тема и упаковка
+        run: |
+          cargo run -q -- lisp examples/dashboard.lisp --to /tmp/ci-dash
+          grep -q 'place 800x480' /tmp/ci-dash/form.lazr
+          grep -q 'at 16 50' /tmp/ci-dash/form.lazr
+          grep -q 'anchor right bottom' /tmp/ci-dash/form.lazr
+          grep -q 'fn apply_theme' /tmp/ci-dash/app/src/main.rs
+          grep -q 'ThemePreference::Dark' /tmp/ci-dash/app/src/main.rs
+          grep -q 'UiBuilder::new().max_rect' /tmp/ci-dash/app/src/main.rs
+      - name: упаковка собирает dist
+        run: |
+          cargo run -q -- package /tmp/ci-dash
+          test -f /tmp/ci-dash/dist/app.desktop
+          test -f /tmp/ci-dash/dist/icon.svg
+          test -f /tmp/ci-dash/dist/app-debug.tar.gz
+          grep -q 'Name=' /tmp/ci-dash/dist/app.desktop
       - name: S-выражения и пример Paint разбираются
         run: |
           cargo run -q -- lisp examples/paint.lisp > /tmp/paint.lazr

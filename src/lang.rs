@@ -251,6 +251,7 @@ pub fn eval(forms: &[Value]) -> Result<Evaluated, LispError> {
             fields: Vec::new(),
             rust: Vec::new(),
             rust_fields: Vec::new(),
+            theme: Default::default(),
             root: vec![Widget::container(WidgetKind::Vbox)],
         },
         env: HashMap::new(),
@@ -315,6 +316,55 @@ impl Builder {
                 })?;
                 let value = args.get(2).and_then(Value::text).unwrap_or_default();
                 self.screen.fields.push(Field { name, ty, value });
+                Ok(None)
+            }
+            "theme" => {
+                let mut theme = crate::model::Theme::default();
+                let mut i = 0;
+                if let Some(first) = args.first() {
+                    match first.text().as_deref() {
+                        Some("dark") => {
+                            theme.dark = true;
+                            i = 1;
+                        }
+                        Some("light") => {
+                            theme.dark = false;
+                            i = 1;
+                        }
+                        _ => {}
+                    }
+                }
+                while i < args.len() {
+                    let key = match &args[i] {
+                        // Допускаем и :accent, и accent — тема не место для педантизма.
+                        Value::Sym(key) => key.trim_start_matches(':').to_string(),
+                        other => {
+                            return Err(LispError::new(
+                                format!("в теме ожидался параметр :имя, а не {other:?}"),
+                                "(theme dark :accent \"#388bfd\" :font 15)",
+                            ))
+                        }
+                    };
+                    let value = args.get(i + 1).cloned().unwrap_or(Value::Nil);
+                    match key.as_str() {
+                        "accent" => theme.accent = value.text(),
+                        "font" => {
+                            theme.font = value.num().unwrap_or(theme.font as f64) as f32
+                        }
+                        "spacing" => {
+                            theme.spacing = value.num().unwrap_or(theme.spacing as f64) as f32
+                        }
+                        "round" => theme.round = value.num().unwrap_or(theme.round as f64) as u8,
+                        other => {
+                            return Err(LispError::new(
+                                format!("параметр темы :{other} неизвестен"),
+                                ":accent :font :spacing :round",
+                            ))
+                        }
+                    }
+                    i += 2;
+                }
+                self.screen.theme = theme;
                 Ok(None)
             }
             "rust-field" => {
@@ -384,7 +434,7 @@ impl Builder {
                 Ok(None)
             }
             "label" | "button" | "checkbox" | "text-input" | "slider" | "space" | "separator"
-            | "vbox" | "hbox" | "grid" | "scroll" | "custom" => {
+            | "vbox" | "hbox" | "grid" | "scroll" | "place" | "custom" => {
                 self.node(&head, args)
             }
             other => Err(LispError::new(
@@ -407,6 +457,7 @@ impl Builder {
             "hbox" => WidgetKind::Hbox,
             "grid" => WidgetKind::Grid,
             "scroll" => WidgetKind::Scroll,
+            "place" => WidgetKind::Place,
             "custom" => WidgetKind::Custom(
                 args.first()
                     .and_then(Value::text)
@@ -422,7 +473,8 @@ impl Builder {
 
         let mut index = 0;
         // Текст и обработчик — позиционные, остальное — ключевые слова.
-        if !kind.is_container() && !matches!(kind, WidgetKind::Custom(_)) {
+        let numeric_head = matches!(head, "space" | "grid" | "place");
+        if !kind.is_container() && !matches!(kind, WidgetKind::Custom(_)) && !numeric_head {
             if let Some(first) = args.first() {
                 match first {
                     Value::List(_) => {}
@@ -445,6 +497,15 @@ impl Builder {
                 index = 1;
             }
         }
+        if head == "place" {
+            if let (Some(w), Some(h)) = (
+                args.first().and_then(Value::num),
+                args.get(1).and_then(Value::num),
+            ) {
+                widget.box_size = Some((w as f32, h as f32));
+                index = 2;
+            }
+        }
         if head == "grid" {
             if let Some(value) = args.first().and_then(Value::num) {
                 widget.number = Some(value as f32);
@@ -463,9 +524,95 @@ impl Builder {
                     }
                     i += 1;
                 }
+                // Позиционные атрибуты места: at X Y, size WxH, anchor right bottom.
+                Value::Sym(word) if word == "at" => {
+                    let x = args.get(i + 1).and_then(Value::num);
+                    let y = args.get(i + 2).and_then(Value::num);
+                    match (x, y) {
+                        (Some(x), Some(y)) => {
+                            widget.at = Some((x as f32, y as f32));
+                            i += 3;
+                        }
+                        _ => {
+                            return Err(LispError::new(
+                                "у at нужны две координаты",
+                                "(label \"x\" at 20 30)",
+                            ))
+                        }
+                    }
+                }
+                Value::Sym(word) if word == "size" => {
+                    let next = args.get(i + 1);
+                    if let Some(Value::Sym(spec)) = next {
+                        match spec.split_once('x') {
+                            Some((w, h)) => {
+                                if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+                                    widget.box_size = Some((w, h));
+                                    i += 2;
+                                } else {
+                                    return Err(LispError::new(
+                                        format!("размер «{spec}» не разобрать"),
+                                        "size 160x32",
+                                    ));
+                                }
+                            }
+                            None => {
+                                return Err(LispError::new(
+                                    format!("размер «{spec}» без высоты"),
+                                    "size 160x32",
+                                ))
+                            }
+                        }
+                    } else if let (Some(w), Some(h)) = (
+                        next.and_then(Value::num),
+                        args.get(i + 2).and_then(Value::num),
+                    ) {
+                        widget.box_size = Some((w as f32, h as f32));
+                        i += 3;
+                    } else {
+                        return Err(LispError::new("у size нет размера", "size 160x32"));
+                    }
+                }
+                Value::Sym(word) if word == "anchor" => {
+                    let mut right = false;
+                    let mut bottom = false;
+                    let mut step = 1;
+                    for extra in args.iter().skip(i + 1) {
+                        match extra.text().as_deref() {
+                            Some("right") => {
+                                right = true;
+                                step += 1;
+                            }
+                            Some("bottom") => {
+                                bottom = true;
+                                step += 1;
+                            }
+                            Some("left") | Some("top") | Some("center") => step += 1,
+                            _ => break,
+                        }
+                    }
+                    widget.anchor = (right, bottom);
+                    i += step;
+                }
                 Value::Sym(key) if key.starts_with(':') => {
+                    let name = key[1..].to_string();
+                    // :at и :box принимают и пару чисел, и список (10 20).
+                    if name == "at" || name == "box" {
+                        if let (Some(x), Some(y)) = (
+                            args.get(i + 1).and_then(Value::num),
+                            args.get(i + 2).and_then(Value::num),
+                        ) {
+                            if name == "at" {
+                                widget.at = Some((x as f32, y as f32));
+                            } else {
+                                widget.box_size = Some((x as f32, y as f32));
+                            }
+                            i += 3;
+                            continue;
+                        }
+                    }
                     let value = args.get(i + 1).cloned().unwrap_or(Value::Nil);
-                    self.apply_keyword(&key[1..], &value, &mut widget, &mut style)?;
+                    self.apply_keyword(&name, &value, &mut widget, &mut style)?;
                     i += 2;
                 }
                 _ => i += 1,
@@ -484,6 +631,35 @@ impl Builder {
     ) -> Result<(), LispError> {
         match key {
             "bind" => widget.bind = value.text(),
+            // Действие можно задать и строкой — тем же языком, что и в строчной модели.
+            "do" => widget.effect = value.text(),
+            "at" => {
+                if let Value::List(items) = value {
+                    if let (Some(x), Some(y)) = (
+                        items.first().and_then(Value::num),
+                        items.get(1).and_then(Value::num),
+                    ) {
+                        widget.at = Some((x as f32, y as f32));
+                    }
+                }
+            }
+            "box" => {
+                if let Value::List(items) = value {
+                    if let (Some(w), Some(h)) = (
+                        items.first().and_then(Value::num),
+                        items.get(1).and_then(Value::num),
+                    ) {
+                        widget.box_size = Some((w as f32, h as f32));
+                    }
+                }
+            }
+            "anchor" => {
+                let text = value.text().unwrap_or_default();
+                widget.anchor = (
+                    text.contains("right"),
+                    text.contains("bottom"),
+                );
+            }
             "size" => style.size = value.num().map(|v| v as f32),
             "bold" => style.bold = matches!(value, Value::Bool(true)),
             "key" => style.key = value.text(),
@@ -514,7 +690,7 @@ impl Builder {
             other => {
                 return Err(LispError::new(
                     format!("параметр :{other} неизвестен"),
-                    ":bind :size :bold :color :pad :width :height :align :grow :range",
+                    ":bind :do :size :bold :color :pad :width :height :align :grow :range :icon :key :at :box :anchor",
                 ))
             }
         }

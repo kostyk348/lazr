@@ -6,6 +6,9 @@ use std::process::Command;
 use crate::codegen;
 use crate::model::{self, Field, FieldType, Screen, Widget, WidgetKind};
 
+/// Иконка приложения: тот же логотип, что на странице lazr.
+const ICON_SVG: &str = include_str!("../docs/logo.svg");
+
 pub struct Project {
     pub dir: PathBuf,
     pub screen: Screen,
@@ -42,6 +45,7 @@ impl Project {
             fields: Vec::new(),
             rust: Vec::new(),
             rust_fields: Vec::new(),
+            theme: Default::default(),
             root: vec![Widget::container(WidgetKind::Vbox)],
         };
         let project = Project { dir, screen };
@@ -113,6 +117,86 @@ impl Project {
     pub fn binary(&self) -> PathBuf {
         let bin = codegen::bin_name(&self.screen);
         self.target_dir().join("debug").join(bin)
+    }
+
+    /// Упаковка: бинарь, иконка, .desktop и архив в dist/.
+    ///
+    /// Установщика нет и не будет, пока не появится подпись: это честная
+    /// граница — .desktop + иконка + tarball, а не инсталлятор.
+    pub fn package(&self, release: bool) -> Result<Vec<String>, String> {
+        let profile = if release { "release" } else { "debug" };
+        let mut args = vec!["build".to_string()];
+        if release {
+            args.push("--release".to_string());
+        }
+        let output = Command::new("cargo")
+            .args(&args)
+            .arg("--offline")
+            .env("CARGO_TARGET_DIR", self.target_dir())
+            .current_dir(self.app_dir())
+            .output()
+            .map_err(|err| format!("cargo не запустился: {err}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "{{\"ok\":false,\"stage\":\"package\",\"log\":{}}}",
+                model::json_str(&String::from_utf8_lossy(&output.stderr))
+            ));
+        }
+        let bin = codegen::bin_name(&self.screen);
+        let built = self.target_dir().join(profile).join(&bin);
+        if !built.exists() {
+            return Err(format!("сборка прошла, а бинаря нет: {}", built.display()));
+        }
+        let dist = self.dir.join("dist");
+        std::fs::create_dir_all(&dist).map_err(|err| format!("dist: {err}"))?;
+        std::fs::copy(&built, dist.join(&bin)).map_err(|err| format!("копия бинаря: {err}"))?;
+
+        let icon_svg = dist.join("icon.svg");
+        std::fs::write(&icon_svg, ICON_SVG).map_err(|err| format!("icon.svg: {err}"))?;
+        let icon_png = dist.join("icon.png");
+        let mut icon_line = "icon.png".to_string();
+        let converted = Command::new("rsvg-convert")
+            .arg("-w")
+            .arg("256")
+            .arg("-h")
+            .arg("256")
+            .arg(&icon_svg)
+            .arg("-o")
+            .arg(&icon_png)
+            .status();
+        if !matches!(converted, Ok(status) if status.success()) {
+            icon_line = "icon.svg".to_string();
+        }
+
+        let desktop = format!(
+            "[Desktop Entry]\nType=Application\nName={title}\nComment=Собрано lazr из модели экрана\nExec={bin}\nIcon={icon}\nTerminal=false\nCategories=Utility;\n",
+            title = self.screen.title,
+            bin = bin,
+            icon = icon_line,
+        );
+        std::fs::write(dist.join(format!("{bin}.desktop")), desktop)
+            .map_err(|err| format!("desktop: {err}"))?;
+
+        let archive = dist.join(format!("{bin}-{profile}.tar.gz"));
+        let status = Command::new("tar")
+            .arg("-czf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&dist)
+            .arg(&bin)
+            .arg(format!("{bin}.desktop"))
+            .arg(&icon_line)
+            .status();
+        if !matches!(status, Ok(status) if status.success()) {
+            return Err("tar не смог собрать архив".to_string());
+        }
+
+        Ok(vec![
+            format!("бинарь: {}", dist.join(&bin).display()),
+            format!("иконка: {}", dist.join(&icon_line).display()),
+            format!("ярлык:  {}", dist.join(format!("{bin}.desktop")).display()),
+            format!("архив:  {}", archive.display()),
+        ])
     }
 
     /// Полная проверка собранной программы: компиляция, кадр без окна, прогон действий.

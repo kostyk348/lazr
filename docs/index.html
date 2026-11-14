@@ -76,7 +76,7 @@
       S-выражениями, — а <code>lazr</code> собирает из неё настоящий проект на egui/eframe и проверяет его
       запуском. Rust остаётся HAL: окно, память, пиксели.</p>
     <div class="badges">
-      <span class="badge"><b>33</b> теста</span>
+      <span class="badge"><b>37</b> тестов</span>
       <span class="badge"><b>0</b> зависимостей у инструмента</span>
       <span class="badge">MCP внутри</span>
       <span class="badge">детерминированная генерация</span>
@@ -132,6 +132,48 @@
 </section>
 
 <section>
+  <h2>Раскладка числами, тема строкой</h2>
+  <p class="sub">Место фиксированного размера, абсолютные точки, якоря от правого и нижнего края — как в форме
+    Lazarus, только в тексте. Тема — одна строка на модель.</p>
+  <div class="cols">
+    <div class="card">
+      <div class="cap"><span>place + anchor</span><span>модель</span></div>
+<pre>(<span class="k">place</span> <span class="n">800 480</span>
+  (<span class="k">label</span> <span class="s">"Пульт"</span> at <span class="n">16 10</span> size <span class="n">200x28</span> :size <span class="n">22</span>)
+  (<span class="k">vbox</span> :box <span class="n">240 170</span> :at <span class="n">16 50</span>
+    (<span class="k">custom</span> card))
+  (<span class="k">button</span> <span class="s">"Пересчитать"</span> at <span class="n">16 436</span> size <span class="n">160x32</span>
+          :icon <span class="s">"refresh"</span> :key <span class="s">"ctrl+r"</span>)
+  (<span class="k">button</span> <span class="s">"Очистить"</span> anchor right bottom
+          at <span class="n">16 16</span> size <span class="n">130x32</span>))</pre>
+    </div>
+    <div class="card">
+      <div class="cap"><span>тема</span><span>модель</span></div>
+<pre>(<span class="k">theme</span> dark accent <span class="s">"#388bfd"</span>
+       font <span class="n">15</span> spacing <span class="n">10</span> round <span class="n">8</span>)
+
+<span class="c">; компилируется в fn apply_theme(ctx):</span>
+<span class="c">; Visuals::dark() + акцент + шрифт + отступы</span>
+<span class="c">; + CornerRadius::same(8)</span>
+
+(<span class="k">window</span> <span class="s">"Пульт"</span> <span class="n">820 560</span>)</pre>
+    </div>
+  </div>
+  <div class="shot" style="margin-top:16px"><img src="dashboard.png" alt="окно Пульт: три карточки в ряд, журнал, кнопки в углах"></div>
+</section>
+
+<section>
+  <h2>Упаковка в одну команду</h2>
+  <p class="sub">Бинарь, иконка из логотипа, ярлык <code>.desktop</code> и архив — в <code>dist/</code>.
+    Установщика и подписи нет: это названная граница, а не забытая галочка.</p>
+  <div class="term"><span class="p">$</span> lazr package /tmp/paint --release
+бинарь: /tmp/paint/dist/paint
+иконка: /tmp/paint/dist/icon.png
+ярлык:  /tmp/paint/dist/paint.desktop
+архив:  /tmp/paint/dist/paint-release.tar.gz</div>
+</section>
+
+<section>
   <h2>Демо: Краски</h2>
   <p class="sub">Полноценный Paint, целиком описанный моделью: восемь инструментов, палитра, толщина, отмена
     по Ctrl+Z, сохранение и открытие файла, горячие клавиши 1–8.</p>
@@ -152,7 +194,12 @@ selftest ok: 2 действий
   <p class="sub">Всё это — операции модели, а не «сгенерируй файл целиком».</p>
   <div class="grid">
     <div class="feat"><h3>Раскладка</h3><p><code>vbox</code>, <code>hbox</code>, <code>grid N</code>,
-      <code>scroll</code>, <code>space</code>, ширина/высота, выравнивание влево/по центру/вправо.</p></div>
+      <code>scroll</code>, <code>space</code> и <code>place</code> с абсолютными точками, размерами и якорями
+      right/bottom.</p></div>
+    <div class="feat"><h3>Тема</h3><p>Тёмная или светлая основа, акцент, шрифт, отступы, скругления — одной
+      строкой модели; применяется и в окне, и в головном кадре.</p></div>
+    <div class="feat"><h3>Упаковка</h3><p><code>lazr package</code>: бинарь, <code>icon.png</code> из логотипа,
+      ярлык <code>.desktop</code>, tar.gz. Без установщика — его нет честно, а не забыли.</p></div>
     <div class="feat"><h3>Стили</h3><p>Размер, жирность, цвет (<code>#rrggbb</code> или имя), отступы,
       растяжение по ширине.</p></div>
     <div class="feat"><h3>Иконки</h3><p>40 имён без внешних зависимостей: <code>save</code>, <code>open</code>,
@@ -175,13 +222,13 @@ selftest ok: 2 действий
   <div class="honest">
     <h3>Что пока не сделано</h3>
     <ul>
-      <li><b>Раскладка как в Lazarus</b> — якоря, привязки, абсолютные координаты: нужен свой решатель, а не
-        пара обёрток egui. Сейчас линейные контейнеры, сетка и размеры.</li>
+      <li><b>Раскладка как в Lazarus</b> — абсолютные точки и два якоря уже есть; нет процентов от контейнера,
+        привязок к краям как в Qt и пересчёта формы при ресайзе.</li>
       <li><b>Стили как в CSS</b> — нет шрифтов, тем, теней, скруглений.</li>
       <li><b>Сложные обработчики</b> — условия и арифметика есть, вызовов функций и списков нет: всё сверх
         этого уходит в <code>rust widget</code>, и тогда это уже не модель.</li>
       <li><b>История модели</b> — git есть, встроенного undo/веток модели нет.</li>
-      <li><b>Упаковка</b> — нет установщиков, иконок приложения и подписи бинаря.</li>
+      <li><b>Упаковка</b> — нет установщика и подписи бинаря: есть <code>.desktop</code>, иконка и архив.</li>
       <li><b>Рантайм-Lisp</b> — S-выражения сегодня язык автора, а не интерпретатор внутри приложения.
         Lisp-машина в полном смысле (правка форм без пересборки) — следующий шаг.</li>
     </ul>

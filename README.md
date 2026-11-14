@@ -48,6 +48,9 @@ lazr mcp                   # то же самое для агента, по MCP
 | действие | `button "Плюс" do count += 1` | `(button "Плюс" (set! count (+ count 1)))` |
 | условие | `do if count >= 9 { count = 0 } else { count += 1 }` | `(if (>= count 9) (set! count 0) (set! count (+ count 1)))` |
 | раскладка | `vbox`, `hbox`, `grid 2`, `scroll`, `space 12` | `(vbox …)`, `(grid 2 …)` |
+| абсолютно | `place 800x480` + `at 16 50 size 240x170` | `(place 800 480 (vbox :at 16 50 :box 240 170 …))` |
+| якоря | `anchor right bottom at 16 16` | `:anchor "right bottom"` |
+| тема | `theme dark accent:#388bfd font:15 spacing:10 round:8` | `(theme dark :accent "#388bfd" :font 15)` |
 | стиль | `{size:22, bold, color:#e5484d, pad:12, align:center, grow}` | `:size 22 :color "#e5484d" :pad 12` |
 | иконка | `{icon:save}` | `:icon "save"` |
 | горячая клавиша | `{key:ctrl+s}` | `:key "ctrl+s"` |
@@ -72,6 +75,38 @@ lazr mcp                   # то же самое для агента, по MCP
 * **генерация детерминированная**: одна модель — один и тот же код;
 * **проверка без экрана**: `--headless` прогоняет кадр egui, а `--selftest` вызывает все действия;
 * **ноль зависимостей у самого инструмента**: `lazr` — чистый stdlib Rust; сгенерированному приложению нужны только `egui`/`eframe`.
+
+## Раскладка: как в форме, а не «на глазок»
+
+`place` — это место фиксированного размера, внутри которого координаты абсолютные, а `anchor` считает их от
+правого/нижнего края. Это то, чего не хватало: пульты, канвасы и панели теперь ставятся числами.
+
+```lisp
+(place 800 480
+  (label "Пульт" at 16 10 size 200x28 :size 22 :bold true)
+  (vbox :box 240 170 :at 16 50 (custom card))
+  (button "Пересчитать" at 16 436 size 160x32 :icon "refresh" :key "ctrl+r")
+  (button "Очистить" anchor right bottom at 16 16 size 130x32 :icon "delete"))
+```
+
+Тема — одна строка на модель: тёмная/светлая основа, акцент, размер шрифта, отступы, скругления. Она
+компилируется в `fn apply_theme(ctx)` и применяется и в окне, и в головном кадре (поэтому тема тоже
+проверяется, а не только описывается).
+
+![Пульт](docs/dashboard.png)
+
+## Упаковка
+
+```console
+$ lazr package /tmp/paint --release
+бинарь: /tmp/paint/dist/paint
+иконка: /tmp/paint/dist/icon.png
+ярлык:  /tmp/paint/dist/paint.desktop
+архив:  /tmp/paint/dist/paint-release.tar.gz
+```
+
+В `dist/` ложатся бинарь, `icon.png` (из `docs/logo.svg` через `rsvg-convert`), ярлык `.desktop` с `Name` из
+заголовка модели и tar.gz. Установщика и подписи нет — это честная граница, а не забытая галочка.
 
 ## Проверка — три факта, а не обещание
 
@@ -177,7 +212,7 @@ $ lazr lisp examples/paint.lisp --to /tmp/paint    # модель + проект
 ## Проверка
 
 ```bash
-cargo test        # 33 теста: модель, язык действий, S-выражения, генерация, проект
+cargo test        # 37 тестов: модель, раскладка, тема, язык действий, S-выражения, генерация
 cargo run -- demo # сквозной прогон: модель → код → сборка → headless
 ```
 

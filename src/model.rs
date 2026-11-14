@@ -165,6 +165,8 @@ pub enum WidgetKind {
     Hbox,
     Grid,
     Scroll,
+    /// Абсолютное размещение: место фиксированного размера и точки внутри него.
+    Place,
     Custom(String),
 }
 
@@ -182,13 +184,18 @@ impl WidgetKind {
             WidgetKind::Hbox => "hbox",
             WidgetKind::Grid => "grid",
             WidgetKind::Scroll => "scroll",
+            WidgetKind::Place => "place",
             WidgetKind::Custom(_) => "custom",
         }
     }
     pub fn is_container(&self) -> bool {
         matches!(
             self,
-            WidgetKind::Vbox | WidgetKind::Hbox | WidgetKind::Grid | WidgetKind::Scroll
+            WidgetKind::Vbox
+                | WidgetKind::Hbox
+                | WidgetKind::Grid
+                | WidgetKind::Scroll
+                | WidgetKind::Place
         )
     }
     pub fn parse_kind(text: &str) -> Option<WidgetKind> {
@@ -204,6 +211,7 @@ impl WidgetKind {
             "hbox" => WidgetKind::Hbox,
             "grid" => WidgetKind::Grid,
             "scroll" => WidgetKind::Scroll,
+            "place" => WidgetKind::Place,
             _ => return None,
         })
     }
@@ -220,6 +228,7 @@ impl WidgetKind {
             "hbox",
             "grid",
             "scroll",
+            "place",
             "custom",
         ]
     }
@@ -234,6 +243,12 @@ pub struct Widget {
     pub range: Option<(f64, f64)>,
     /// Число колонок у grid или пиксели отступа у space.
     pub number: Option<f32>,
+    /// Абсолютная точка внутри place (в пикселях от левого верхнего угла).
+    pub at: Option<(f32, f32)>,
+    /// Размер блока для place: ширина и высота.
+    pub box_size: Option<(f32, f32)>,
+    /// Якорь: (справа, снизу) — точка считается от правого/нижнего края.
+    pub anchor: (bool, bool),
     pub style: Style,
     pub children: Vec<Widget>,
 }
@@ -247,6 +262,9 @@ impl Widget {
             bind: None,
             range: None,
             number: None,
+            at: None,
+            box_size: None,
+            anchor: (false, false),
             style: Style::default(),
             children: Vec::new(),
         }
@@ -285,6 +303,53 @@ pub struct Field {
     pub value: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Theme {
+    pub dark: bool,
+    pub accent: Option<String>,
+    pub font: f32,
+    pub spacing: f32,
+    pub round: u8,
+}
+
+impl Default for Theme {
+    fn default() -> Theme {
+        Theme {
+            dark: true,
+            accent: None,
+            font: 14.0,
+            spacing: 8.0,
+            round: 4,
+        }
+    }
+}
+
+impl Theme {
+    pub fn is_default(&self) -> bool {
+        *self == Theme::default()
+    }
+    pub fn as_str(&self) -> String {
+        let mut parts = vec![if self.dark {
+            "dark".to_string()
+        } else {
+            "light".to_string()
+        }];
+        if let Some(accent) = &self.accent {
+            parts.push(format!("accent:{accent}"));
+        }
+        if (self.font - 14.0).abs() > f32::EPSILON {
+            parts.push(format!("font:{}", trim_float(self.font)));
+        }
+        if (self.spacing - 8.0).abs() > f32::EPSILON {
+            parts.push(format!("spacing:{}", trim_float(self.spacing)));
+        }
+        if self.round != 4 {
+            parts.push(format!("round:{}", self.round));
+        }
+        format!("theme {}", parts.join(" "))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Screen {
     pub title: String,
@@ -293,6 +358,7 @@ pub struct Screen {
     pub fields: Vec<Field>,
     pub rust: Vec<RustBlock>,
     pub rust_fields: Vec<RustField>,
+    pub theme: Theme,
     pub root: Vec<Widget>,
 }
 
@@ -335,7 +401,7 @@ pub fn json_str(text: &str) -> String {
 }
 
 /// Разбор строки на слова: кавычки и `{…}` — один токен, даже с пробелами внутри.
-fn tokens(line: &str) -> Vec<String> {
+fn tokens(line: &str) -> Vec<(String, bool)> {
     let mut out = Vec::new();
     let mut current = String::new();
     let mut quoted = false;
@@ -355,7 +421,7 @@ fn tokens(line: &str) -> Vec<String> {
             match ch {
                 '\\' => escaped = true,
                 '"' => {
-                    out.push(current.clone());
+                    out.push((current.clone(), true));
                     current.clear();
                     quoted = false;
                 }
@@ -367,7 +433,7 @@ fn tokens(line: &str) -> Vec<String> {
             '"' => quoted = true,
             '{' => {
                 if depth == 0 && !current.is_empty() {
-                    out.push(current.clone());
+                    out.push((current.clone(), false));
                     current.clear();
                 }
                 depth += 1;
@@ -382,7 +448,7 @@ fn tokens(line: &str) -> Vec<String> {
                 }
                 depth -= 1;
                 if depth == 0 {
-                    out.push(format!("{{{current}}}"));
+                    out.push((format!("{{{current}}}"), false));
                     current.clear();
                 } else {
                     current.push('}');
@@ -390,7 +456,7 @@ fn tokens(line: &str) -> Vec<String> {
             }
             c if c.is_whitespace() && depth == 0 => {
                 if !current.is_empty() {
-                    out.push(current.clone());
+                    out.push((current.clone(), false));
                     current.clear();
                 }
             }
@@ -398,13 +464,23 @@ fn tokens(line: &str) -> Vec<String> {
         }
     }
     if !current.is_empty() {
-        out.push(current);
+        out.push((current, false));
     }
     out
 }
 
 pub fn parse_style_text(text: &str) -> Result<Style, String> {
     parse_style(&format!("{{{text}}}"))
+}
+
+/// Стиль — это `{ключ:значение, …}`, а не блок кода `{ count = 0 }`.
+pub fn is_style_token(token: &str) -> bool {
+    if !token.starts_with('{') || !token.ends_with('}') {
+        return false;
+    }
+    let inner = &token[1..token.len() - 1];
+    let before_space = inner.split_whitespace().next().unwrap_or("");
+    before_space.contains(':')
 }
 
 fn parse_style(text: &str) -> Result<Style, String> {
@@ -474,6 +550,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         fields: Vec::new(),
         rust: Vec::new(),
         rust_fields: Vec::new(),
+        theme: Theme::default(),
         root: Vec::new(),
     };
     let lines: Vec<&str> = text.lines().collect();
@@ -489,7 +566,9 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         }
         let indent = line.len() - line.trim_start().len();
         let depth = indent / 2;
-        let words = tokens(line.trim_start());
+        let parts = tokens(line.trim_start());
+        let words: Vec<String> = parts.iter().map(|(text, _)| text.clone()).collect();
+        let quoted: Vec<bool> = parts.iter().map(|(_, was_quoted)| *was_quoted).collect();
         let Some(head) = words.first().cloned() else {
             continue;
         };
@@ -624,6 +703,30 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     }
                 }
             }
+            "theme" => {
+                let mut theme = Theme::default();
+                for word in words.iter().skip(1) {
+                    let (key, value) = match word.split_once(':') {
+                        Some((key, value)) => (key, value),
+                        None => (word.as_str(), ""),
+                    };
+                    match key {
+                        "dark" => theme.dark = true,
+                        "light" => theme.dark = false,
+                        "accent" => theme.accent = Some(value.to_string()),
+                        "font" => theme.font = value.parse().unwrap_or(theme.font),
+                        "spacing" => theme.spacing = value.parse().unwrap_or(theme.spacing),
+                        "round" => theme.round = value.parse().unwrap_or(theme.round),
+                        other => errors.push(ModelError {
+                            line: line_no,
+                            code: "BAD_THEME",
+                            message: format!("свойство темы «{other}» неизвестно"),
+                            hint: "theme dark accent:#388bfd font:15 spacing:8 round:6".into(),
+                        }),
+                    }
+                }
+                screen.theme = theme;
+            }
             "state" => {
                 if words.len() < 3 {
                     errors.push(ModelError {
@@ -692,10 +795,11 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                 } else {
                     match words.get(1) {
                         Some(candidate)
-                            if !candidate.starts_with('{')
-                                && candidate != "do"
-                                && candidate != "->"
-                                && candidate.parse::<f32>().is_err() =>
+                            if quoted.get(1).copied().unwrap_or(false)
+                                || (!candidate.starts_with('{')
+                                    && candidate != "do"
+                                    && candidate != "->"
+                                    && candidate.parse::<f32>().is_err()) =>
                         {
                             text = candidate.clone();
                             text_start = 2;
@@ -718,10 +822,15 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     .get(text_start.min(words.len())..)
                     .unwrap_or(&[])
                     .to_vec();
+                let rest_quoted: Vec<bool> = quoted
+                    .get(text_start.min(quoted.len())..)
+                    .unwrap_or(&[])
+                    .to_vec();
                 let mut i = 0;
                 while i < rest.len() {
                     let token = rest[i].clone();
-                    if token.starts_with('{') {
+                    let was_quoted = rest_quoted.get(i).copied().unwrap_or(false);
+                    if !was_quoted && token.starts_with('{') {
                         match parse_style(&token) {
                             Ok(style) => widget.style = style,
                             Err(err) => errors.push(ModelError {
@@ -739,11 +848,14 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                         let mut end = rest.len();
                         for (offset, item) in rest.iter().enumerate().skip(i + 1) {
                             // Стиль — это {ключ:значение}, а не блок «{ count = 0 }».
-                            let is_style = item.starts_with('{')
-                                && item.ends_with('}')
-                                && item.contains(':')
-                                && !item.contains(' ');
-                            if is_style || item == "->" {
+                            let quoted_here = rest_quoted.get(offset).copied().unwrap_or(false);
+                            let is_style = !quoted_here && is_style_token(item);
+                            if is_style
+                                || item == "->"
+                                || item == "at"
+                                || item == "size"
+                                || item == "anchor"
+                            {
                                 end = offset;
                                 break;
                             }
@@ -761,6 +873,84 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                             }
                         }
                         i += 1;
+                    } else if token == "at" {
+                        let x = rest.get(i + 1).and_then(|v| v.parse::<f32>().ok());
+                        let y = rest.get(i + 2).and_then(|v| v.parse::<f32>().ok());
+                        match (x, y) {
+                            (Some(x), Some(y)) => {
+                                widget.at = Some((x, y));
+                                i += 3;
+                            }
+                            _ => {
+                                errors.push(ModelError {
+                                    line: line_no,
+                                    code: "BAD_AT",
+                                    message: "у at нужны две координаты".into(),
+                                    hint: "label \"x\" at 20 30".into(),
+                                });
+                                i += 1;
+                            }
+                        }
+                    } else if token == "size" {
+                        let raw = rest.get(i + 1).cloned().unwrap_or_default();
+                        let parsed = match raw.split_once('x') {
+                            Some((w, h)) => match (w.parse::<f32>(), h.parse::<f32>()) {
+                                (Ok(w), Ok(h)) => Some((w, h)),
+                                _ => None,
+                            },
+                            None => match (
+                                raw.parse::<f32>(),
+                                rest.get(i + 2).and_then(|v| v.parse::<f32>().ok()),
+                            ) {
+                                (Ok(w), Some(h)) => Some((w, h)),
+                                _ => None,
+                            },
+                        };
+                        match parsed {
+                            Some(size) => {
+                                widget.box_size = Some(size);
+                                i += if raw.contains('x') { 2 } else { 3 };
+                            }
+                            None => {
+                                errors.push(ModelError {
+                                    line: line_no,
+                                    code: "BAD_SIZE",
+                                    message: "у size нужен размер вида 140x32".into(),
+                                    hint: "button \"x\" at 10 10 size 140x32".into(),
+                                });
+                                i += 1;
+                            }
+                        }
+                    } else if token == "anchor" {
+                        let mut right = false;
+                        let mut bottom = false;
+                        let mut step = 1;
+                        for extra in rest.iter().skip(i + 1) {
+                            match extra.as_str() {
+                                "right" => {
+                                    right = true;
+                                    step += 1;
+                                }
+                                "left" => step += 1,
+                                "bottom" => {
+                                    bottom = true;
+                                    step += 1;
+                                }
+                                "top" => step += 1,
+                                "center" => step += 1,
+                                _ => break,
+                            }
+                        }
+                        widget.anchor = (right, bottom);
+                        i += step;
+                    } else if token.contains('x') && widget.kind == WidgetKind::Place {
+                        let (w, h) = token.split_once('x').unwrap_or_default();
+                        if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+                            widget.box_size = Some((w, h));
+                            i += 1;
+                        } else {
+                            i += 1;
+                        }
                     } else if let Ok(number) = token.parse::<f32>() {
                         widget.number = Some(number);
                         i += 1;
@@ -887,6 +1077,10 @@ pub fn render(screen: &Screen) -> String {
         }
         out.push_str("}\n");
     }
+    if !screen.theme.is_default() {
+        out.push_str(&screen.theme.as_str());
+        out.push('\n');
+    }
     render_widgets(&screen.root, 0, &mut out);
     out
 }
@@ -904,6 +1098,12 @@ fn render_widgets(widgets: &[Widget], depth: usize, out: &mut String) {
                 }
             }
         }
+        let place_sized = widget.kind == WidgetKind::Place && widget.box_size.is_some();
+        if let Some((w, h)) = widget.box_size {
+            if place_sized {
+                line.push_str(&format!(" {}x{}", trim_float(w), trim_float(h)));
+            }
+        }
         if let Some(number) = widget.number {
             line.push_str(&format!(" {}", trim_float(number)));
         }
@@ -915,6 +1115,24 @@ fn render_widgets(widgets: &[Widget], depth: usize, out: &mut String) {
         }
         if let Some(effect) = &widget.effect {
             line.push_str(&format!(" do {effect}"));
+        }
+        if let Some((x, y)) = widget.at {
+            line.push_str(&format!(" at {} {}", trim_float(x), trim_float(y)));
+        }
+        if let Some((w, h)) = widget.box_size {
+            if !place_sized {
+                line.push_str(&format!(" size {}x{}", trim_float(w), trim_float(h)));
+            }
+        }
+        if widget.anchor.0 || widget.anchor.1 {
+            let mut parts: Vec<&str> = Vec::new();
+            if widget.anchor.0 {
+                parts.push("right");
+            }
+            if widget.anchor.1 {
+                parts.push("bottom");
+            }
+            line.push_str(&format!(" anchor {}", parts.join(" ")));
         }
         if !widget.style.is_empty() {
             line.push_str(&format!(" {{{}}}", widget.style.as_str()));
@@ -978,6 +1196,43 @@ vbox {pad:12}
   hbox {align:center}
     text_input "Имя" -> name {grow}
 "#;
+
+    #[test]
+    fn place_keeps_absolute_points_and_anchors() {
+        let screen = parse(
+            r#"window "t" 400x300
+place 320x200
+  label "a" at 10 20 size 100x24
+  button "b" anchor right bottom at 8 8 size 90x30
+theme dark accent:#388bfd font:16 spacing:12 round:10
+"#,
+        )
+        .unwrap();
+        let place = &screen.root[0];
+        assert_eq!(place.box_size, Some((320.0, 200.0)));
+        let first = &place.children[0];
+        assert_eq!(first.at, Some((10.0, 20.0)));
+        assert_eq!(first.box_size, Some((100.0, 24.0)));
+        let second = &place.children[1];
+        assert_eq!(second.anchor, (true, true));
+        assert_eq!(second.at, Some((8.0, 8.0)));
+        assert!(screen.theme.dark, "без слова light тема остаётся тёмной");
+        assert_eq!(screen.theme.accent.as_deref(), Some("#388bfd"));
+    }
+
+    #[test]
+    fn theme_round_trips_through_the_model() {
+        let screen =
+            parse("window \"t\" 300x200\ntheme light accent:#39d353 font:18 spacing:6 round:12\n")
+                .unwrap();
+        assert!(!screen.theme.dark);
+        assert_eq!(screen.theme.font, 18.0);
+        assert_eq!(screen.theme.spacing, 6.0);
+        assert_eq!(screen.theme.round, 12);
+        let text = render(&screen);
+        let again = parse(&text).unwrap();
+        assert_eq!(again.theme, screen.theme, "тема должна переживать рендер");
+    }
 
     #[test]
     fn styles_and_layouts_parse() {
