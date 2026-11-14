@@ -457,9 +457,15 @@ fn cmd_live(args: &[String]) -> i32 {
                     continue;
                 }
                 stamp = now;
-                let Ok(text) = std::fs::read_to_string(&source) else { continue };
-                let Ok(forms) = lang::read(&text) else { continue };
-                let Ok(evaluated) = lang::eval(&forms) else { continue };
+                let Ok(text) = std::fs::read_to_string(&source) else {
+                    continue;
+                };
+                let Ok(forms) = lang::read(&text) else {
+                    continue;
+                };
+                let Ok(evaluated) = lang::eval(&forms) else {
+                    continue;
+                };
                 let _ = std::fs::write(&rendered_path, model::render(&evaluated.screen));
             }
         });
