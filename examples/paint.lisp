@@ -468,7 +468,7 @@ if ui.button("💾 Сохранить").on_hover_text("Ctrl+S").clicked() || sho
         None => state.status = "нет zenity/kdialog: системный диалог недоступен".to_string(),
     }
 }
-if ui.button("📂 Открыть").on_hover_text("Ctrl+O").clicked() || shortcut(ui, "ctrl+o") {
+if ui.button("📂 Открыть").on_hover_text("Ctrl+O / F7").clicked() || shortcut(ui, "ctrl+o") || shortcut(ui, "f7") {
     match pick_file(false, &state.file) {
         Some(receiver) => {
             state.dialog = Some(receiver);
@@ -476,6 +476,27 @@ if ui.button("📂 Открыть").on_hover_text("Ctrl+O").clicked() || shortcu
             state.status = "выберите файл".to_string();
         }
         None => state.status = "нет zenity/kdialog: системный диалог недоступен".to_string(),
+    }
+}
+if shortcut(ui, "f5") || shortcut(ui, "ctrl+shift+s") || ui.button("💾 Записать по пути").on_hover_text("F5").clicked() {
+    match save_ppm(&state.file, &state.raster, state.raster_w, state.raster_h) {
+        Ok(()) => state.status = format!("записано: {}", state.file),
+        Err(err) => state.status = format!("не записалось: {err}"),
+    }
+}
+if shortcut(ui, "f6") || shortcut(ui, "ctrl+shift+o") || ui.button("📂 Прочитать по пути").on_hover_text("F6").clicked() {
+    match load_ppm(&state.file) {
+        Some((pixels, w, h)) => {
+            state.undo.push(Snapshot { strokes: state.strokes.clone(), raster: state.raster.clone() });
+            state.strokes.clear();
+            state.raster = pixels;
+            state.raster_w = w;
+            state.raster_h = h;
+            state.texture = None;
+            state.dirty = true;
+            state.status = format!("прочитано: {} ({w}x{h})", state.file);
+        }
+        None => state.status = format!("не прочитать как PPM: {}", state.file),
     }
 }
 if ui.button("🗑 Очистить").on_hover_text("Ctrl+N").clicked() || shortcut(ui, "ctrl+n") {
@@ -654,6 +675,10 @@ ui.horizontal(|ui| {
     (slider "толщина" :bind size :range (1 40))
     (space 12)
     (text-input "надпись" :bind text :grow true))
+  (space 6)
+  (hbox
+    (label "файл" :size 12 :color "#8b949e")
+    (text-input "путь" :bind file :grow true))
   (space 8)
   (custom canvas)
   (space 4)

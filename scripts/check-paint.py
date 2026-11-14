@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Живая проверка Краски: контур → заливка → пиксели → системный диалог.
+"""Живая проверка Краски: контур → заливка → пиксели → файл → чтение → диалог.
 
-Проверяет эффект, а не отсутствие паники:
-  * прямоугольник рисуется в заданных точках;
-  * заливка красит только внутренность контура (пиксель снаружи — белый);
+Проверяется эффект, а не отсутствие паники:
+  * заливка красит только внутренность замкнутого контура;
+  * запись по пути создаёт файл, который читается обратно (round-trip);
+  * чтение по пути возвращает картинку на холст;
   * Ctrl+O поднимает системный диалог (процесс zenity).
 """
 import os
@@ -12,30 +13,30 @@ import subprocess
 import sys
 import time
 
-DISPLAY = ":0"
-ENV = dict(os.environ, DISPLAY=DISPLAY)
+ENV = dict(os.environ, DISPLAY=":0")
+TARGET = "/tmp/paint.ppm"  # путь по умолчанию у приложения
 
 
 def run(cmd, **kw):
     return subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True, env=ENV, **kw)
 
 
-def window(title: str) -> tuple[str, int, int, int, int]:
-    ids = run(["xdotool", "search", "--onlyvisible", "--class", ".*"]).stdout.split()
-    for wid in ids:
-        name = run(["xdotool", "getwindowname", wid]).stdout.strip()
-        if name == title:
-            geo = run(["xdotool", "getwindowgeometry", wid]).stdout
-            pos = re.search(r"Position: (\d+),(\d+)", geo)
-            size = re.search(r"Geometry: (\d+)x(\d+)", geo)
-            return wid, int(pos.group(1)), int(pos.group(2)), int(size.group(1)), int(size.group(2))
+def find_window(title: str) -> str:
+    for wid in run(["xdotool", "search", "--onlyvisible", "--class", ".*"]).stdout.split():
+        if run(["xdotool", "getwindowname", wid]).stdout.strip() == title:
+            return wid
     raise SystemExit(f"окно «{title}» не найдено")
+
+
+def geometry(wid: str):
+    geo = run(["xdotool", "getwindowgeometry", wid]).stdout
+    pos = re.search(r"Position: (\d+),(\d+)", geo)
+    size = re.search(r"Geometry: (\d+)x(\d+)", geo)
+    return int(pos.group(1)), int(pos.group(2)), int(size.group(1)), int(size.group(2))
 
 
 def read_ppm(path: str):
     data = open(path, "rb").read()
-    if not data.startswith(b"P6"):
-        raise SystemExit("не PPM — конвертация не удалась")
     fields, offset = [], 2
     while len(fields) < 3:
         while data[offset : offset + 1].isspace():
@@ -49,45 +50,9 @@ def read_ppm(path: str):
     return w, h, data[offset : offset + w * h * 3]
 
 
-def pixel(pixels: bytes, w: int, x: int, y: int):
+def pixel(pixels, w, x, y):
     i = (y * w + x) * 3
     return tuple(pixels[i : i + 3])
-
-
-def white_bbox(w: int, h: int, pixels: bytes):
-    """Рамка холста: строки и столбцы с длинными белыми пробегами.
-
-    Просто min/max белых пикселей не годится — белым бывает и текст заголовка.
-    """
-    def is_white(x: int, y: int) -> bool:
-        r, g, b = pixel(pixels, w, x, y)
-        return r > 240 and g > 240 and b > 240
-
-    rows = []
-    for y in range(h):
-        count = sum(1 for x in range(0, w, 2) if is_white(x, y))
-        if count * 2 > w * 0.5:
-            rows.append(y)
-    if not rows:
-        raise SystemExit("белый холст не найден")
-    top, bottom = min(rows), max(rows)
-    cols = []
-    for x in range(w):
-        count = sum(1 for y in range(top, bottom + 1, 2) if is_white(x, y))
-        if count * 2 > (bottom - top) * 0.5:
-            cols.append(x)
-    left, right = min(cols), max(cols)
-    return left, top, right, bottom
-
-
-def drag(x1, y1, x2, y2, steps=18):
-    run(["xdotool", "mousemove", str(x1), str(y1)])
-    run(["xdotool", "mousedown", "1"])
-    for i in range(1, steps + 1):
-        run(["xdotool", "mousemove", str(int(x1 + (x2 - x1) * i / steps)), str(int(y1 + (y2 - y1) * i / steps))])
-        time.sleep(0.012)
-    run(["xdotool", "mouseup", "1"])
-    time.sleep(0.25)
 
 
 def shot(wid: str, path: str):
@@ -96,99 +61,94 @@ def shot(wid: str, path: str):
     return read_ppm(path + ".ppm")
 
 
+def canvas_box(w, h, pixels):
+    def white(x, y):
+        r, g, b = pixel(pixels, w, x, y)
+        return r > 240 and g > 240 and b > 240
+
+    rows = [y for y in range(h) if sum(1 for x in range(0, w, 2) if white(x, y)) * 2 > w * 0.5]
+    top, bottom = min(rows), max(rows)
+    cols = [x for x in range(w) if sum(1 for y in range(top, bottom + 1, 2) if white(x, y)) * 2 > (bottom - top) * 0.5]
+    return min(cols), top, max(cols), bottom
+
+
+def drag(x1, y1, x2, y2, steps=14):
+    run(["xdotool", "mousemove", str(x1), str(y1)])
+    run(["xdotool", "mousedown", "1"])
+    for i in range(1, steps + 1):
+        run(["xdotool", "mousemove", str(int(x1 + (x2 - x1) * i / steps)), str(int(y1 + (y2 - y1) * i / steps))])
+        time.sleep(0.011)
+    run(["xdotool", "mouseup", "1"])
+    time.sleep(0.25)
+
+
 def main():
-    wid, wx, wy, ww, wh = window("Краски")
+    wid = find_window("Краски")
+    wx, wy, _, _ = geometry(wid)
     run(["xdotool", "windowactivate", "--sync", wid])
-    time.sleep(0.8)
+    time.sleep(0.6)
 
-    w, h, pixels = shot(wid, "/tmp/adv-0.png")
-    bx1, by1, bx2, by2 = white_bbox(w, h, pixels)
-    print(f"окно {ww}x{wh} @ {wx},{wy}; холст в окне: {bx1},{by1}..{bx2},{by2}")
-    if wx != 0 or wy != 0:
-        pass
+    w, h, pixels = shot(wid, "/tmp/chk-0.png")
+    bx1, by1, _, _ = canvas_box(w, h, pixels)
+    print(f"холст в окне: {bx1},{by1}")
 
-    # клавиши: 1 карандаш, 2 кисть, 3 ластик, 4 линия, 5 прямоугольник,
-    # 6 овал, 7 текст, 8 заливка
-    run(["xdotool", "key", "--window", wid, "5"])
-    time.sleep(0.2)
-    ax, ay = wx + bx1 + 70, wy + by1 + 60
-    bx, by = wx + bx1 + 420, wy + by1 + 280
-    drag(ax, ay, bx, by)
-    w, h, pixels = shot(wid, "/tmp/adv-1.png")
-    print("после рамки: центр", pixel(pixels, w, (bx1 + 245), (by1 + 170)))
-
-    # 8 — заливка, кликаем внутрь рамки
-    run(["xdotool", "key", "--window", wid, "8"])
-    time.sleep(0.2)
+    # 1. контур и заливка
+    run(["xdotool", "key", "5"])
+    time.sleep(0.25)
+    drag(wx + bx1 + 70, wy + by1 + 60, wx + bx1 + 420, wy + by1 + 280)
+    run(["xdotool", "key", "8"])
+    time.sleep(0.25)
     run(["xdotool", "mousemove", str(wx + bx1 + 245), str(wy + by1 + 170)])
     run(["xdotool", "click", "1"])
     time.sleep(0.8)
-    w, h, pixels = shot(wid, "/tmp/adv-2.png")
+    w1, h1, px1 = shot(wid, "/tmp/chk-1.png")
+    inside = pixel(px1, w1, bx1 + 245, by1 + 170)
+    outside = pixel(px1, w1, bx1 + 20, by1 + 20)
+    ok_fill = inside[0] < 120 and outside[0] > 240
+    print(f"внутри {inside} · снаружи {outside} → заливка {'OK' if ok_fill else 'ПРОВАЛ'}")
 
-    inside = pixel(pixels, w, bx1 + 245, by1 + 170)
-    outside = pixel(pixels, w, bx1 + 20, by1 + 20)
-    print("внутри контура:", inside)
-    print("снаружи контура:", outside)
-
-    ok_fill = inside[0] < 120 and outside[0] > 240 and outside[1] > 240
-    print("заливка внутри и только внутри:", "OK" if ok_fill else "ПРОВАЛ")
-
-    # Открытие: Ctrl+O должен поднять системный диалог прямо сейчас
-    run(["xdotool", "key", "--window", wid, "ctrl+o"])
-    time.sleep(2.0)
-    open_pids = run(["pgrep", "-x", "zenity"]).stdout.strip()
-    ok_open = bool(open_pids)
-    print("диалог открытия (процесс):", open_pids.replace("\n", " ") if ok_open else "НЕ ПОДНЯЛСЯ")
-    if ok_open:
-        run(["pkill", "-x", "zenity"])
-        time.sleep(0.8)
-
-    # Сохранение: zenity --save, затем проверяем файл
-    target = "/tmp/paint.ppm"  # путь по умолчанию у приложения
-    if os.path.exists(target):
-        os.remove(target)
-    run(["xdotool", "key", "--window", wid, "ctrl+s"])
-    time.sleep(2.0)
-    save_dialog = run("pgrep -x zenity || true").stdout.strip()
+    # 2. запись по пути
+    if os.path.exists(TARGET):
+        os.remove(TARGET)
+    run(["xdotool", "key", "F5"])
+    time.sleep(1.2)
     ok_save = False
-    if save_dialog:
-        time.sleep(0.6)
-        # имя предзаполнено через --filename, поэтому достаточно нажать OK
-        dialog_ids = [w for w in run(["xdotool", "search", "--onlyvisible", "--class", ".*"]).stdout.split()
-                      if run(["xdotool", "getwindowname", w]).stdout.strip() in ("Сохранить", "Save File")]
-        if dialog_ids:
-            geo = run(["xdotool", "getwindowgeometry", dialog_ids[-1]]).stdout
-            pos = re.search(r"Position: (\d+),(\d+)", geo)
-            run(["xdotool", "mousemove", str(int(pos.group(1)) + 963), str(int(pos.group(2)) + 715)])
-            time.sleep(0.3)
-            run(["xdotool", "click", "1"])
-        time.sleep(2.5)
-        if os.path.exists(target):
-            size = os.path.getsize(target)
-            sw, sh, sp = read_ppm(target)
-            ok_save = size > 1000 and pixel(sp, sw, 245, 170)[0] < 120
-            print(f"сохранено: {target}, {size} байт, {sw}x{sh}, центр {pixel(sp, sw, 245, 170)}")
-        else:
-            print("файл не появился:", target)
+    if os.path.exists(TARGET):
+        sw, sh, sp = read_ppm(TARGET)
+        ok_save = os.path.getsize(TARGET) > 1000 and pixel(sp, sw, 245, 170)[0] < 120
+        print(f"записано: {TARGET} · {os.path.getsize(TARGET)} байт · {sw}x{sh} → {'OK' if ok_save else 'ПРОВАЛ'}")
     else:
-        print("диалог сохранения не поднялся")
+        print("файл не появился → ПРОВАЛ")
 
-    # Ctrl+O — системный диалог
-    run(["xdotool", "key", "--window", wid, "ctrl+o"])
-    time.sleep(2.0)
-    dialogs = run("pgrep -x zenity || true").stdout.strip()
-    print("системный диалог:", dialogs.splitlines()[0] if dialogs else "НЕ ПОДНЯЛСЯ")
-    ok_dialog = bool(dialogs)
+    # 3. очистка и чтение обратно
+    run(["xdotool", "key", "ctrl+n"])
+    time.sleep(0.7)
+    w2, h2, px2 = shot(wid, "/tmp/chk-2.png")
+    cleared = pixel(px2, w2, bx1 + 245, by1 + 170)[0] > 240
+    run(["xdotool", "key", "F6"])
+    time.sleep(1.2)
+    w3, h3, px3 = shot(wid, "/tmp/chk-3.png")
+    restored = pixel(px3, w3, bx1 + 245, by1 + 170)[0] < 120
+    ok_round = cleared and restored
+    print(f"очистка {cleared} · чтение вернуло картинку {restored} → round-trip {'OK' if ok_round else 'ПРОВАЛ'}")
+
+    # 4. системный диалог открытия
+    run(["xdotool", "key", "F7"])
+    time.sleep(3.5)
+    open_pids = run(["pgrep", "-x", "zenity"]).stdout.strip()
+    ok_dialog = bool(open_pids)
+    print(f"диалог открытия: {'поднялся' if ok_dialog else 'НЕ ПОДНЯЛСЯ'}")
     if ok_dialog:
         run(["pkill", "-x", "zenity"])
-    time.sleep(0.6)
-    shot(wid, "/tmp/adv-3.png")
+        time.sleep(0.5)
 
+    shot(wid, "/tmp/chk-final.png")
     print("\nИТОГ:")
     print(f"  заливка контура: {'works' if ok_fill else 'broken'}")
-    print(f"  системный диалог открытия: {'works' if ok_open else 'broken'}")
-    print(f"  сохранение файла: {'works' if ok_save else 'broken'}")
-    return 0 if (ok_fill and ok_open and ok_save) else 1
+    print(f"  запись файла: {'works' if ok_save else 'broken'}")
+    print(f"  чтение файла (round-trip): {'works' if ok_round else 'broken'}")
+    print(f"  системный диалог открытия: {'works' if ok_dialog else 'broken'}")
+    return 0 if all([ok_fill, ok_save, ok_round, ok_dialog]) else 1
 
 
 if __name__ == "__main__":

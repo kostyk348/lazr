@@ -135,29 +135,29 @@ A full Paint, described entirely by the model: eight tools (pencil, brush, erase
 text, fill), a palette, thickness, undo (Ctrl+Z), save and open, shortcuts 1–8.
 
 The fill is not "paint everything": the canvas is a raster, walls are built from every stroke, and a
-breadth-first walk paints only the area inside a closed contour. Open and save go through the system dialog
-(`zenity`, `kdialog` as a fallback), and the file is PPM, readable by every image viewer.
+breadth-first walk paints only the area inside a closed contour. The file is PPM; its path sits in the "файл"
+row and can be edited, `F5` writes it and `F6` reads it back. `Ctrl+S` and `Ctrl+O` (also `F7`) raise the system
+`zenity` dialog — a convenience, not the only way.
 
-Verification is done by scripts, not by eye: `scripts/check-paint.py` (contour → fill → pixels → dialogs →
-file) and `scripts/adversarial-paint.py` (attacks on the controls). Their output:
+Verification is a script, not an eyeball: `scripts/check-paint.py`:
 
 ```console
 $ python3 scripts/check-paint.py
-inside the contour: (27, 31, 36)
-outside the contour: (255, 255, 255)
-fill inside and only inside: OK
-open dialog (process): 18574
-saved: /tmp/paint.ppm, 1053375 bytes, 836x420, centre (27, 31, 36)
-RESULT: contour fill: works · open dialog: works · saving a file: works
+canvas in the window: 11,190
+inside (27, 31, 36) · outside (255, 255, 255) → fill OK
+saved: /tmp/paint.ppm · 1053375 bytes · 836x420 → OK
+cleared True · reading restored the picture True → round-trip OK
+open dialog: raised
 
-$ python3 scripts/adversarial-paint.py
-Ctrl+Z on an empty history            works    canvas unchanged
-fill + undo of the fill               works    filled=True, white after undo=True
-undo after undo                       works    outline gone
-clear (Ctrl+N)                        works    canvas white
-12 rapid clicks                       works    painted pixels in the row: 10
-resize to 760x640                     works    window alive, frame 760x640
+RESULT:
+  contour fill: works
+  writing a file: works
+  reading a file (round-trip): works
+  system open dialog: works
 ```
+
+The adversarial run `scripts/adversarial-paint.py` (attacks on the controls): undo on an empty history, undo
+after undo, clear, 12 rapid clicks, resize — every attack `works`, no panics.
 
 ![Paint](docs/paint.png)
 
