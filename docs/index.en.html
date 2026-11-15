@@ -208,10 +208,30 @@ problems: 0
   <div class="shot"><img src="dashboard.png" alt="Dashboard window: three cards in a row, a journal below, buttons in the corners"></div>
 </section>
 
+<section id="styles">
+  <h2>42 styles, one line each</h2>
+  <p class="sub">A style is data. The repo ships <code>skills/design-styles/SKILL.md</code>:
+    Frutiger Aero, Aqua, Web 2.0, Windows 95, Mac System 7, CRT green, Material 3, Neobrutalism,
+    Cyberpunk, Nord, Catppuccin, Bauhaus and three dozen more — each with a ready line you paste
+    into a model as is.</p>
+  <div class="term"><span class="p">theme</span> light accent:#00a2e8 panel:#e6f2f9 card:#ffffff muted:#2f4c5c font:14 spacing:8 round:12</div>
+  <p class="sub">Keys: <code>dark|light</code>, <code>accent</code>, <code>panel</code> (window fill),
+    <code>card</code> (card fill), <code>muted</code> (secondary text and lines), <code>font</code>,
+    <code>spacing</code>, <code>round</code>. lazr has no gradients, shadows or blur — a style rests on
+    palette, shape and rhythm, and that limit is stated out loud.</p>
+</section>
+
 <section>
   <h2>Demos</h2>
   <p class="sub">Every demo is a model file, and every one is verified by scripts — not by eyeballs.</p>
   <div class="demos">
+        <div class="demo"><h3>Player</h3><p>Frutiger Aero: a <code>rust-widget</code> visualiser,
+      glyph transport, a single play/pause button via <code>when … else</code>, a queue.</p>
+      <code>examples/player.lisp · 46 lines · 732 ms to build</code></div>
+    <div class="demo"><h3>Cinema</h3><p>A dark cinematic style: timeline, speed, subtitles, a
+      "watched" mark behind a condition.</p><code>examples/cinema.lisp · 41 lines · 708 ms</code></div>
+    <div class="demo"><h3>Terminal</h3><p>CRT green: command log, input, a row template, seeded list
+      items.</p><code>examples/terminal.lisp · 24 lines · 700 ms</code></div>
     <div class="demo"><h3>Paint</h3><p>Eight tools, palette, undo, contour flood fill, save/open through a system dialog.</p><code>examples/paint.lisp</code></div>
     <div class="demo"><h3>Dashboard</h3><p>Absolute layout: three cards, a journal, corner buttons, anchored hint.</p><code>examples/dashboard.lisp</code></div>
     <div class="demo"><h3>Budget</h3><p>Arithmetic in handlers: <code>(set! total (* total 2))</code>, a step slider.</p><code>examples/calc.lisp</code></div>
@@ -282,6 +302,7 @@ archive:/tmp/paint/dist/kraski-release.tar.gz</div>
     </ul>
   </div>
   <div class="shots">
+    <figure><img src="player.png" alt="Player: visualiser, transport, queue"><figcaption>Player — a Rust-widget visualiser and glyph transport</figcaption></figure>
     <figure><img src="gate.png" alt="Access: a panel gated by a condition"><figcaption>Access — string comparison and gated panels</figcaption></figure>
     <figure><img src="thermostat.png" alt="Thermostat: thresholds and the else branch"><figcaption>Thermostat — numbers, thresholds and <code>when … else</code></figcaption></figure>
     <figure><img src="checklist.png" alt="Checklist: a list row template"><figcaption>Checklist — row template: <code>{item}</code> and its own button</figcaption></figure>

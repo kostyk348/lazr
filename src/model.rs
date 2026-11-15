@@ -206,7 +206,6 @@ impl WidgetKind {
             WidgetKind::Else => "else",
             WidgetKind::Card => "card",
             WidgetKind::Icon => "icon",
-            WidgetKind::Else => "else",
             WidgetKind::Custom(_) => "custom",
         }
     }
@@ -243,7 +242,6 @@ impl WidgetKind {
             "else" => WidgetKind::Else,
             "card" => WidgetKind::Card,
             "icon" => WidgetKind::Icon,
-            "else" => WidgetKind::Else,
             _ => return None,
         })
     }
@@ -344,6 +342,12 @@ pub struct Field {
 pub struct Theme {
     pub dark: bool,
     pub accent: Option<String>,
+    /// Фон панели/окна: у ретро-стилей он светло-серый, у тёмных — почти чёрный.
+    pub panel: Option<String>,
+    /// Фон карточки.
+    pub card: Option<String>,
+    /// Цвет вторичного текста.
+    pub muted: Option<String>,
     pub font: f32,
     pub spacing: f32,
     pub round: u8,
@@ -357,6 +361,9 @@ impl Default for Theme {
             font: 14.0,
             spacing: 8.0,
             round: 4,
+            panel: None,
+            card: None,
+            muted: None,
         }
     }
 }
@@ -373,6 +380,15 @@ impl Theme {
         }];
         if let Some(accent) = &self.accent {
             parts.push(format!("accent:{accent}"));
+        }
+        if let Some(panel) = &self.panel {
+            parts.push(format!("panel:{panel}"));
+        }
+        if let Some(card) = &self.card {
+            parts.push(format!("card:{card}"));
+        }
+        if let Some(muted) = &self.muted {
+            parts.push(format!("muted:{muted}"));
         }
         if (self.font - 14.0).abs() > f32::EPSILON {
             parts.push(format!("font:{}", trim_float(self.font)));
@@ -809,6 +825,9 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                         "font" => theme.font = value.parse().unwrap_or(theme.font),
                         "spacing" => theme.spacing = value.parse().unwrap_or(theme.spacing),
                         "round" => theme.round = value.parse().unwrap_or(theme.round),
+                        "panel" => theme.panel = Some(value.to_string()),
+                        "card" => theme.card = Some(value.to_string()),
+                        "muted" => theme.muted = Some(value.to_string()),
                         other => errors.push(ModelError {
                             line: line_no,
                             code: "BAD_THEME",

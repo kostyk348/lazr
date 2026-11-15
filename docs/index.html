@@ -304,10 +304,30 @@ selftest ok: 2 действий
   </div>
 </section>
 
+<section id="styles">
+  <h2>42 стиля одной строкой</h2>
+  <p class="sub">Стиль — это данные. В репозитории лежит скилл <code>skills/design-styles/SKILL.md</code>:
+    Frutiger Aero, Aqua, Web 2.0, Windows 95, Mac System 7, CRT green, Material 3, Neobrutalism,
+    Cyberpunk, Nord, Catppuccin, Bauhaus и ещё три десятка — у каждого готовая строка, которую
+    вставляют в модель как есть.</p>
+  <div class="term"><span class="p">theme</span> light accent:#00a2e8 panel:#e6f2f9 card:#ffffff muted:#2f4c5c font:14 spacing:8 round:12</div>
+  <p class="sub">Ключи: <code>dark|light</code>, <code>accent</code>, <code>panel</code> (фон окна),
+    <code>card</code> (фон карточки), <code>muted</code> (вторичный текст и линии), <code>font</code>,
+    <code>spacing</code>, <code>round</code>. Градиентов, теней и размытия в lazr нет — стиль держится
+    на палитре, форме и ритме, и это ограничение названо вслух.</p>
+</section>
+
 <section>
   <h2>Демки</h2>
   <p class="sub">Каждая демка — файл модели, и каждая проверена скриптами, а не «на глаз».</p>
   <div class="demos">
+        <div class="demo"><h3>Плеер</h3><p>Frutiger Aero: визуализатор на <code>rust-widget</code>,
+      транспорт из глифов, одна кнопка play/pause через <code>when … else</code>, очередь.</p>
+      <code>examples/player.lisp · 46 строк · сборка 732 мс</code></div>
+    <div class="demo"><h3>Кино</h3><p>Тёмный кинематографичный стиль: таймлайн, скорость, субтитры,
+      отметка «досмотрел» по условию.</p><code>examples/cinema.lisp · 41 строка · сборка 708 мс</code></div>
+    <div class="demo"><h3>Терминал</h3><p>CRT green: журнал команд, ввод, шаблон строки, начальные
+      элементы списка.</p><code>examples/terminal.lisp · 24 строки · сборка 700 мс</code></div>
     <div class="demo"><h3>Краски</h3><p>Восемь инструментов, палитра, отмена, заливка контура, сохранение и
       открытие через системный диалог.</p><code>examples/paint.lisp</code></div>
     <div class="demo"><h3>Пульт</h3><p>Абсолютная раскладка: три карточки, журнал, кнопки по углам, якорная
@@ -328,6 +348,7 @@ selftest ok: 2 действий
     <div class="demo"><h3>Живая модель</h3><p>Витрина рантайма: правишь файл — окно следует.</p><code>examples/live-demo.lisp</code></div>
   </div>
   <div class="shots">
+    <figure><img src="player.png" alt="Плеер: визуализатор, транспорт, очередь"><figcaption>Плеер — визуализатор на Rust-виджете и транспорт из глифов</figcaption></figure>
     <figure><img src="gate.png" alt="Доступ: панель по условию"><figcaption>Доступ — сравнение строк и панели по условию</figcaption></figure>
     <figure><img src="thermostat.png" alt="Термостат: пороги и ветка else"><figcaption>Термостат — числа, пороги и <code>when … else</code></figcaption></figure>
     <figure><img src="checklist.png" alt="Чек-лист: шаблон строки списка"><figcaption>Чек-лист — шаблон строки: <code>{item}</code> и своя кнопка</figcaption></figure>

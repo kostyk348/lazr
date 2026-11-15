@@ -344,6 +344,24 @@ fn theme_code(screen: &Screen) -> String {
         .as_deref()
         .and_then(color_code)
         .unwrap_or_else(|| "egui::Color32::from_rgb(56, 139, 253)".to_string());
+    let panel = theme
+        .panel
+        .as_deref()
+        .and_then(color_code)
+        .map(|code| format!("Some({code})"))
+        .unwrap_or_else(|| "None".to_string());
+    let card = theme
+        .card
+        .as_deref()
+        .and_then(color_code)
+        .map(|code| format!("Some({code})"))
+        .unwrap_or_else(|| "None".to_string());
+    let muted = theme
+        .muted
+        .as_deref()
+        .and_then(color_code)
+        .map(|code| format!("Some({code})"))
+        .unwrap_or_else(|| "None".to_string());
     // Подключённый TTF с иконками: семейство «icons», глифы берём из него.
     let icon_font = match &screen.icon_font {
         Some(path) => format!(
@@ -381,6 +399,9 @@ fn apply_theme(ctx: &egui::Context) {{
         egui::Color32::WHITE
     }};
     let dark = {};
+    let panel: Option<egui::Color32> = {panel};
+    let card: Option<egui::Color32> = {card};
+    let muted: Option<egui::Color32> = {muted};
     let round = egui::CornerRadius::same({});
     let spacing = {};
     let font = {};
@@ -431,11 +452,23 @@ fn apply_theme(ctx: &egui::Context) {{
         }} else {{
             egui::Color32::from_rgb(238, 241, 246)
         }};
-        style.visuals.panel_fill = if dark {{
+        // panel/card из модели: у ретро-стилей светло-серые, у тёмных — почти чёрные
+        style.visuals.panel_fill = panel.unwrap_or(if dark {{
             egui::Color32::from_rgb(10, 12, 16)
         }} else {{
             egui::Color32::from_rgb(250, 251, 253)
-        }};
+        }});
+        // muted: вторичный текст и линии-разделители
+        if let Some(muted) = muted {{
+            style.visuals.weak_text_color = Some(muted);
+            style.visuals.widgets.noninteractive.bg_stroke =
+                egui::Stroke::new(1.0, muted.gamma_multiply(0.7));
+        }}
+        style.visuals.faint_bg_color = card.unwrap_or(if dark {{
+            egui::Color32::from_rgb(22, 26, 33)
+        }} else {{
+            egui::Color32::from_rgb(238, 241, 246)
+        }});
         style.visuals.window_fill = style.visuals.panel_fill;
         // Текст на подсвеченной кнопке должен читаться.
         style.visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, on_accent);
@@ -449,7 +482,10 @@ fn apply_theme(ctx: &egui::Context) {{
         if theme.dark { "true" } else { "false" },
         theme.round,
         float_lit(theme.spacing),
-        float_lit(theme.font)
+        float_lit(theme.font),
+        panel = panel,
+        card = card,
+        muted = muted,
     );
     format!(
         "{icon_font}{}",
@@ -523,6 +559,19 @@ fn key_from_name(name: &str) -> Option<egui::Key> {{
 "#,
         key_table()
     )
+}
+
+/// Иконка, заданная кодемпоинтом или самим символом приватной зоны:
+/// `icon "\uf04b"` или `icon ""`. Встроенный набор обрабатывается отдельно.
+fn custom_glyph(name: &str) -> Option<String> {
+    if name.contains("\\u") {
+        return Some(crate::model::unescape(name));
+    }
+    let mut chars = name.chars();
+    match (chars.next(), chars.next()) {
+        (Some(ch), None) if (ch as u32) >= 0xE000 => Some(ch.to_string()),
+        _ => None,
+    }
 }
 
 fn styled_text(text_code: &str, widget: &Widget) -> String {
@@ -633,6 +682,25 @@ fn emit_widget(
             out.push_str(&format!("{pad}ui.label({text});\n"));
         }
         WidgetKind::Button => {
+            // Компактная кнопка-иконка: подписи нет, глиф из подключённого шрифта.
+            if widget.text.trim().is_empty() {
+                if let Some(glyph) = widget.style.icon.as_deref().and_then(custom_glyph) {
+                    let size = widget.style.size.unwrap_or(16.0);
+                    out.push_str(&format!(
+                        "{pad}if ui.button(egui::RichText::new({}).family(egui::FontFamily::Name(\"icons\".into())).size({})).clicked() {{\n",
+                        rust_string(&glyph),
+                        float_lit(size)
+                    ));
+                    if let Some(effect) = &widget.effect {
+                        let code = expr::compile(screen, effect)
+                            .map_err(|err| format!("{}: {}", err.message, err.hint))?;
+                        let action = emit.action(&widget.text, code);
+                        out.push_str(&format!("{pad}    {action}(state);\n"));
+                    }
+                    out.push_str(&format!("{pad}}}\n"));
+                    return Ok(out);
+                }
+            }
             let text = styled_text(&text_expr_row(&widget.text, screen, emit.row), widget);
             if let Some(effect) = &widget.effect {
                 // В шаблоне строки «remove items» (без индекса) — это «удалить эту строку».
@@ -729,7 +797,7 @@ fn emit_widget(
                 _ => format!("{}..={}", float_lit(a as f32), float_lit(b as f32)),
             };
             out.push_str(&format!(
-                "{pad}ui.add(egui::Slider::new(&mut state.{field}, {range}){label});\n"
+                "{pad}ui.add(egui::Slider::new(&mut state.{field}, {range}).show_value(false){label});\n"
             ));
         }
         WidgetKind::Separator => out.push_str(&format!("{pad}ui.separator();\n")),
@@ -1070,6 +1138,10 @@ impl State {{
 }}
 
 {fns}{widgets}{actions_code}pub fn draw(state: &mut State, ui: &mut egui::Ui) {{
+    // eframe 0.37 отдаёт голый Ui: фон окна никто не рисует, и светлая тема
+    // выглядела чёрной. Красим панель сами — цвет берём из темы.
+    let background = ui.visuals().panel_fill;
+    ui.painter().rect_filled(ui.max_rect(), 0.0, background);
 {body}}}
 
 struct App {{

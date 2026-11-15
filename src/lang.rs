@@ -351,34 +351,62 @@ impl Builder {
                     }
                 }
                 while i < args.len() {
-                    let key = match &args[i] {
-                        // Допускаем и :accent, и accent — тема не место для педантизма.
-                        Value::Sym(key) => key.trim_start_matches(':').to_string(),
+                    // Принимаем три записи: :accent "#hex", accent:#hex (как в строчной
+                    // модели) и пару (accent "#hex"). Строки стилей копируются как есть.
+                    let (key, value, step) = match &args[i] {
+                        Value::List(pair) => {
+                            let key = pair.first().and_then(Value::text).unwrap_or_default();
+                            let value = pair.get(1).cloned().unwrap_or(Value::Nil);
+                            (key.trim_start_matches(':').to_string(), value, 1)
+                        }
+                        Value::Sym(token) => {
+                            let token = token.as_str();
+                            if let Some((key, value)) = token.split_once(':') {
+                                if !key.is_empty() && !value.is_empty() {
+                                    // accent:#00a2e8 — ключ и значение одним токеном
+                                    (
+                                        key.trim_start_matches(':').to_string(),
+                                        Value::Str(value.to_string()),
+                                        1,
+                                    )
+                                } else {
+                                    // ":accent" — ключ-слово без значения, оно в следующем аргументе
+                                    let value = args.get(i + 1).cloned().unwrap_or(Value::Nil);
+                                    (token.trim_start_matches(':').to_string(), value, 2)
+                                }
+                            } else {
+                                let value = args.get(i + 1).cloned().unwrap_or(Value::Nil);
+                                (token.to_string(), value, 2)
+                            }
+                        }
                         other => {
                             return Err(LispError::new(
-                                format!("в теме ожидался параметр :имя, а не {other:?}"),
+                                format!("в теме ожидался параметр, а не {other:?}"),
                                 "(theme dark :accent \"#388bfd\" :font 15)",
                             ))
                         }
                     };
-                    let value = args.get(i + 1).cloned().unwrap_or(Value::Nil);
                     match key.as_str() {
                         "accent" => theme.accent = value.text(),
-                        "font" => {
-                            theme.font = value.num().unwrap_or(theme.font as f64) as f32
-                        }
+                        "panel" => theme.panel = value.text(),
+                        "card" => theme.card = value.text(),
+                        "muted" => theme.muted = value.text(),
+                        // Числа могут прийти и числом, и строкой: (theme dark round:12)
+                        "font" => theme.font = as_num(&value).unwrap_or(theme.font as f64) as f32,
                         "spacing" => {
-                            theme.spacing = value.num().unwrap_or(theme.spacing as f64) as f32
+                            theme.spacing = as_num(&value).unwrap_or(theme.spacing as f64) as f32
                         }
-                        "round" => theme.round = value.num().unwrap_or(theme.round as f64) as u8,
+                        "round" => {
+                            theme.round = as_num(&value).unwrap_or(theme.round as f64) as u8
+                        }
                         other => {
                             return Err(LispError::new(
-                                format!("параметр темы :{other} неизвестен"),
-                                ":accent :font :spacing :round",
+                                format!("параметр темы «{other}» неизвестен"),
+                                ":accent :panel :card :muted :font :spacing :round",
                             ))
                         }
                     }
-                    i += 2;
+                    i += step;
                 }
                 self.screen.theme = theme;
                 Ok(None)
@@ -854,7 +882,21 @@ fn handler(form: &Value) -> Result<String, LispError> {
     }
 }
 
+/// Число из значения: `15`, `"15"`, `12.5`.
+fn as_num(value: &Value) -> Option<f64> {
+    value
+        .num()
+        .or_else(|| value.text().and_then(|text| text.parse().ok()))
+}
+
 fn condition(form: &Value) -> Result<String, LispError> {
+    // (if playing …) — поле-флаг без сравнения
+    if let Value::Sym(name) = form {
+        return Ok(name.clone());
+    }
+    if let Value::Bool(flag) = form {
+        return Ok(flag.to_string());
+    }
     let Value::List(items) = form else {
         return Err(LispError::new("условие должно быть формой", "(>= count 9)"));
     };
@@ -898,6 +940,52 @@ fn expr_text(value: &Value) -> Result<String, LispError> {
 
 #[cfg(test)]
 mod tests {
+    fn screen_of(src: &str) -> crate::model::Screen {
+        let forms = crate::lang::read(src).expect("читается");
+        crate::lang::eval(&forms).expect("вычисляется").screen
+    }
+
+    #[test]
+    fn theme_accepts_both_spellings() {
+        // Строку стиля из скилла копируют в модель как есть — accent:#hex без пробела.
+        let screen = screen_of(
+            r#"(theme light accent:#00a2e8 panel:#e6f2f9 card:#ffffff muted:#2f4c5c font:14 spacing:8 round:12)"#,
+        );
+        let theme = screen.theme;
+        assert!(!theme.dark);
+        assert_eq!(theme.accent.as_deref(), Some("#00a2e8"));
+        assert_eq!(theme.panel.as_deref(), Some("#e6f2f9"));
+        assert_eq!(theme.card.as_deref(), Some("#ffffff"));
+        assert_eq!(theme.muted.as_deref(), Some("#2f4c5c"));
+        assert_eq!(theme.font, 14.0);
+        assert_eq!(theme.spacing, 8.0);
+        assert_eq!(theme.round, 12);
+    }
+
+    #[test]
+    fn theme_accepts_keyword_pairs() {
+        let screen =
+            screen_of(r##"(theme dark :accent "#388bfd" :panel "#0b0f14" :font 15 :round 10)"##);
+        let theme = screen.theme;
+        assert!(theme.dark);
+        assert_eq!(theme.accent.as_deref(), Some("#388bfd"));
+        assert_eq!(theme.panel.as_deref(), Some("#0b0f14"));
+        assert_eq!(theme.font, 15.0);
+        assert_eq!(theme.round, 10);
+    }
+
+    #[test]
+    fn bare_flag_condition_is_not_comparison() {
+        let screen = screen_of(
+            r#"(state playing bool true) (window "p" 300 200) (vbox (when playing (label "a")))"#,
+        );
+        assert_eq!(screen.fields.len(), 1);
+        assert!(matches!(
+            screen.root[0].children[0].kind,
+            crate::model::WidgetKind::When
+        ));
+    }
+
     use super::*;
 
     const SAMPLE: &str = r##"

@@ -74,6 +74,9 @@ struct Node {
 struct Theme {
     dark: bool,
     accent: egui::Color32,
+    panel: Option<egui::Color32>,
+    card: Option<egui::Color32>,
+    muted: Option<egui::Color32>,
     font: f32,
     spacing: f32,
     round: u8,
@@ -84,6 +87,9 @@ impl Default for Theme {
         Theme {
             dark: true,
             accent: egui::Color32::from_rgb(56, 139, 253),
+            panel: None,
+            card: None,
+            muted: None,
             font: 14.0,
             spacing: 8.0,
             round: 8,
@@ -255,6 +261,9 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                             model.theme.spacing = value.parse().unwrap_or(model.theme.spacing)
                         }
                         "round" => model.theme.round = value.parse().unwrap_or(model.theme.round),
+                        "panel" => model.theme.panel = Some(hex_color(value)),
+                        "card" => model.theme.card = Some(hex_color(value)),
+                        "muted" => model.theme.muted = Some(hex_color(value)),
                         _ => {}
                     }
                 }
@@ -1386,6 +1395,9 @@ fn apply_theme(ctx: &egui::Context, theme: &Theme) {
         egui::Color32::WHITE
     };
     let dark = theme.dark;
+    let panel = theme.panel;
+    let card = theme.card;
+    let muted = theme.muted;
     let round = egui::CornerRadius::same(theme.round);
     let spacing = theme.spacing;
     let font = theme.font;
@@ -1395,6 +1407,18 @@ fn apply_theme(ctx: &egui::Context, theme: &Theme) {
         } else {
             egui::Visuals::light()
         };
+        if let Some(panel) = panel {
+            style.visuals.panel_fill = panel;
+            style.visuals.window_fill = panel;
+        }
+        if let Some(card) = card {
+            style.visuals.faint_bg_color = card;
+        }
+        if let Some(muted) = muted {
+            style.visuals.weak_text_color = Some(muted);
+            style.visuals.widgets.noninteractive.bg_stroke =
+                egui::Stroke::new(1.0, muted.gamma_multiply(0.7));
+        }
         style.visuals.selection.bg_fill = accent;
         style.visuals.selection.stroke = egui::Stroke::new(1.0, on_accent);
         style.visuals.hyperlink_color = accent;

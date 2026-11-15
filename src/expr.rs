@@ -205,6 +205,48 @@ impl<'a> Parser<'a> {
         if let Tok::Ident(word) = self.peek().clone() {
             if word == "if" {
                 self.next();
+                // «if playing { … }» — поле-флаг без сравнения
+                if let Tok::Ident(name) = self.peek().clone() {
+                    if matches!(self.toks.get(self.pos + 1), Some(Tok::LBrace)) {
+                        if let Some(field) = self.screen.fields.iter().find(|f| f.name == name) {
+                            if field.ty == FieldType::Bool {
+                                self.next();
+                                let cond = format!("state.{name}");
+                                if !self.eat(&Tok::LBrace) {
+                                    return Err(ExprError::new(
+                                        "после условия нужна «{»",
+                                        "if agree { … } else { … }",
+                                    ));
+                                }
+                                let then_code = self.statements(depth + 1)?;
+                                if !self.eat(&Tok::RBrace) {
+                                    return Err(ExprError::new(
+                                        "условие не закрыто",
+                                        "добавьте «}»",
+                                    ));
+                                }
+                                let mut code = format!("{pad}if {cond} {{\n{then_code}{pad}}}");
+                                if self.eat(&Tok::Ident("else".to_string())) {
+                                    if !self.eat(&Tok::LBrace) {
+                                        return Err(ExprError::new(
+                                            "после else нужна «{»",
+                                            "else { … }",
+                                        ));
+                                    }
+                                    let else_code = self.statements(depth + 1)?;
+                                    if !self.eat(&Tok::RBrace) {
+                                        return Err(ExprError::new(
+                                            "else не закрыт",
+                                            "добавьте «}»",
+                                        ));
+                                    }
+                                    code.push_str(&format!(" else {{\n{else_code}{pad}}}"));
+                                }
+                                return Ok(code);
+                            }
+                        }
+                    }
+                }
                 let (cond, _ty) = self.comparison()?;
                 if !self.eat(&Tok::LBrace) {
                     return Err(ExprError::new(
@@ -581,6 +623,29 @@ pub fn compile(screen: &Screen, source: &str) -> Result<String, ExprError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bare_flag_in_if() {
+        let screen = crate::model::Screen {
+            title: "t".into(),
+            width: 300,
+            height: 200,
+            fields: vec![crate::model::Field {
+                name: "agree".into(),
+                ty: crate::model::FieldType::Bool,
+                value: "true".into(),
+            }],
+            rust: Vec::new(),
+            rust_fields: Vec::new(),
+            theme: crate::model::Theme::default(),
+            icon_font: None,
+            root: Vec::new(),
+        };
+        let code =
+            crate::expr::compile(&screen, "if agree { agree = false }").expect("условие-флаг");
+        assert!(code.contains("if state.agree {"), "{code}");
+        assert!(code.contains("state.agree = false"), "{code}");
+    }
+
     use super::*;
     use crate::model::parse;
 

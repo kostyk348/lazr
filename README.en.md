@@ -139,6 +139,23 @@ Model → live application. Every demo is machine-checked: `--problems` = 0, `ve
 | `todo.lisp` / `.lazr` | Tasks: a list of strings, `append`/`remove`/`clear`, text input, counters |
 | `checklist.lisp` / `.lazr` | Checklist: a row template with `{item}` and its own "remove" button, seeded items |
 | `icons.lisp` | Font Awesome icons and cards: glyphs as code points, no images in the repo |
+| `player.lisp` | Player (Frutiger Aero): a `rust-widget` visualiser, glyph transport, queue, volume |
+| `cinema.lisp` | Cinema (dark): timeline, speed, subtitles, "watched" with gated panels |
+| `terminal.lisp` | Terminal (CRT green): command log, input, row template, seeded list |
+
+### How long each takes to build
+
+| Demo | Model lines | Model → built app | `verify` |
+|---|---|---|---|
+| `player.lisp` | 46 | **732 ms** | 461 ms |
+| `cinema.lisp` | 41 | **708 ms** | 426 ms |
+| `terminal.lisp` | 24 | **700 ms** | 411 ms |
+
+Measured on this machine with a warm shared build cache.
+
+<p align="center">
+  <img src="docs/player.png" alt="A player built from a model: visualiser, transport, queue" width="480">
+</p>
 | `gate.lisp` / `.lazr` | Access: string comparison and conditionally shown panels |
 | `thermostat.lisp` | Thermostat: numbers, thresholds and `when … else` |
 | `calc.lisp` | Budget: arithmetic in handlers (`*`, `/`), step slider |
@@ -153,6 +170,22 @@ Model → live application. Every demo is machine-checked: `--problems` = 0, `ve
 <p align="center">
   <img src="docs/checklist.png" alt="Checklist: a list row template" width="420">
 </p>
+
+## 42 styles out of the box
+
+The repository ships `skills/design-styles/SKILL.md`: 42 named styles — Frutiger Aero, Aqua, Web 2.0,
+Windows 95, Mac System 7, CRT green, Material 3, Neobrutalism, Cyberpunk, Nord, Catppuccin, Bauhaus and more —
+each with a **ready theme line** you can paste into a model as is.
+
+```
+theme light accent:#00a2e8 panel:#e6f2f9 card:#ffffff muted:#2f4c5c font:14 spacing:8 round:12
+```
+
+Theme keys: `dark|light`, `accent`, `panel` (window fill), `card` (card fill), `muted` (secondary text and
+lines), `font`, `spacing`, `round`. A style is data: one line in the model, zero changes in Rust.
+
+What styles cannot do: lazr has no gradients, blur, shadows or textures — a style rests on palette, shape and
+rhythm, not on effects. The skill states that limitation honestly.
 
 ## Icons from an external font, and cards
 
