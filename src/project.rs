@@ -174,20 +174,44 @@ impl Project {
         std::fs::create_dir_all(&dist).map_err(|err| format!("dist: {err}"))?;
         std::fs::copy(&built, dist.join(&bin)).map_err(|err| format!("копия бинаря: {err}"))?;
 
-        let icon_svg = dist.join("icon.svg");
-        std::fs::write(&icon_svg, ICON_SVG).map_err(|err| format!("icon.svg: {err}"))?;
         let icon_png = dist.join("icon.png");
         let mut icon_line = "icon.png".to_string();
-        let converted = Command::new("rsvg-convert")
-            .arg("-w")
-            .arg("256")
-            .arg("-h")
-            .arg("256")
-            .arg(&icon_svg)
-            .arg("-o")
-            .arg(&icon_png)
-            .status();
-        if !matches!(converted, Ok(status) if status.success()) {
+        let mut icon_from_model = false;
+        if let Some(path) = &self.screen.window_icon {
+            // Иконка приложения важнее логотипа lazr: берём её из модели.
+            let bytes =
+                std::fs::read(path).map_err(|err| format!("window-icon «{path}»: {err}"))?;
+            let image =
+                crate::png::decode(&bytes).map_err(|err| format!("window-icon «{path}»: {err}"))?;
+            let icon = image.fit(256);
+            std::fs::write(
+                &icon_png,
+                crate::png::encode_rgba(icon.width, icon.height, &icon.rgba),
+            )
+            .map_err(|err| format!("icon.png: {err}"))?;
+            icon_from_model = true;
+        }
+        let icon_svg = dist.join("icon.svg");
+        if !icon_from_model {
+            std::fs::write(&icon_svg, ICON_SVG).map_err(|err| format!("icon.svg: {err}"))?;
+        }
+        let converted = if icon_from_model {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "иконка взята из модели",
+            ))
+        } else {
+            Command::new("rsvg-convert")
+                .arg("-w")
+                .arg("256")
+                .arg("-h")
+                .arg("256")
+                .arg(&icon_svg)
+                .arg("-o")
+                .arg(&icon_png)
+                .status()
+        };
+        if !matches!(converted, Ok(status) if status.success()) && !icon_from_model {
             icon_line = "icon.svg".to_string();
         }
 

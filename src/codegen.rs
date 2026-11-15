@@ -139,10 +139,6 @@ fn field_type(screen: &Screen, name: &str) -> Option<FieldType> {
         .map(|f| f.ty.clone())
 }
 
-fn text_expr(text: &str, screen: &Screen) -> String {
-    text_expr_row(text, screen, false)
-}
-
 fn text_expr_row(text: &str, screen: &Screen, row: bool) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut args: Vec<String> = Vec::new();
@@ -1210,6 +1206,10 @@ impl eframe::App for App {{
         {store_before}draw(&mut self.state, ui);
         {store_after}
     }}
+
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {{
+        {clear_color}
+    }}
 }}
 
 fn main() {{
@@ -1284,6 +1284,13 @@ fn main() {{
             "false"
         } else {
             "true"
+        },
+        clear_color = if screen.window.transparent {
+            // Полностью прозрачный буфер: иначе окно закрашивается тёмным фоном,
+            // и прозрачность видна только как серое смешение.
+            "[0.0, 0.0, 0.0, 0.0]"
+        } else {
+            "visuals.panel_fill.to_normalized_gamma_f32()"
         },
         store_code = store_code(screen),
         store_save_selftest = if screen.store.is_some() {
@@ -1667,6 +1674,34 @@ label "x""#,
         );
         assert!(source.contains("struct ModelFields"), "нет слепка полей");
         assert!(source.contains("fn model_fields"), "нет снимка полей");
+    }
+
+    #[test]
+    fn transparent_window_clears_fully_transparent() {
+        // Регрессия: eframe по умолчанию заливает буфер тёмным (12,12,12,180),
+        // и прозрачное окно выглядело как серое смешение.
+        let screen = parse("window \"Т\" 300 200 transparent:yes\nlabel \"x\"").expect("модель");
+        let source = main_rs(&screen, "t").expect("генерация");
+        assert!(
+            source.contains("with_transparent(true)"),
+            "нет прозрачности"
+        );
+        assert!(
+            source.contains("[0.0, 0.0, 0.0, 0.0]"),
+            "буфер не прозрачный"
+        );
+        assert!(source.contains("if false {"), "фон всё ещё закрашивается");
+
+        let opaque = parse("window \"Т\" 300 200\nlabel \"x\"").expect("модель");
+        let opaque_source = main_rs(&opaque, "t").expect("генерация");
+        assert!(
+            opaque_source.contains("if true {"),
+            "фон должен закрашиваться"
+        );
+        assert!(
+            opaque_source.contains("visuals.panel_fill.to_normalized_gamma_f32()"),
+            "обычное окно должно чиститься цветом панели"
+        );
     }
 
     #[test]

@@ -264,11 +264,15 @@ window "Player" 480 520 chrome:own topmost:yes drag-anywhere:yes min:420x460
 | `resizable:no` | size is fixed |
 | `topmost:yes` | window stays above others |
 | `drag-anywhere:yes` | drag by any point of the body, not just the title |
-| `transparent:yes` | transparent window background (whatever the model paints shows through) |
+| `transparent:yes` | a truly transparent window: the buffer clears to (0,0,0,0) and the background is not painted |
 | `min:400x300`, `max:1400x1000` | size limits |
 
 Verified by hand: a `chrome:own` window has no system title bar, the app draws both title and cross, and a
 click on the cross terminates the process. `lazr live` does the same — the live frame matches the built app.
+
+`transparent:yes` gives a real transparent window: `clear_color` returns `[0.0, 0.0, 0.0, 0.0]` and the
+background is not painted. Verified by a screen capture: pixels of the transparent window **exactly match**
+the desktop pixels (31,31,31 and 74,75,78 at two points), while the opaque window gives 10,12,16 there.
 
 `center:yes` centres the window once, using `viewport().monitor_size`; both the generator and `lazr live` do it.
 Verified by measurement: a 1920x1200 monitor with a 420x300 window gives position **750,450** — dead centre.

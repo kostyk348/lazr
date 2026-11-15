@@ -470,6 +470,104 @@ fn blocks(
     }
 }
 
+/// CRC32 (полином 0xEDB88320) — нужен и для чтения, и для записи PNG.
+pub fn crc32(data: &[u8]) -> u32 {
+    let mut table = [0u32; 256];
+    for (index, slot) in table.iter_mut().enumerate() {
+        let mut value = index as u32;
+        for _ in 0..8 {
+            value = if value & 1 != 0 {
+                0xedb8_8320 ^ (value >> 1)
+            } else {
+                value >> 1
+            };
+        }
+        *slot = value;
+    }
+    let mut crc = 0xffff_ffffu32;
+    for &byte in data {
+        crc = table[((crc ^ byte as u32) & 0xff) as usize] ^ (crc >> 8);
+    }
+    crc ^ 0xffff_ffff
+}
+
+/// Adler32 — контрольная сумма zlib-потока.
+pub fn adler32(data: &[u8]) -> u32 {
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in data {
+        a = (a + byte as u32) % 65521;
+        b = (b + a) % 65521;
+    }
+    (b << 16) | a
+}
+
+impl Image {
+    /// Уменьшение «ближайшим соседом» до вписанного в `limit` размера.
+    pub fn fit(&self, limit: u32) -> Image {
+        if self.width <= limit && self.height <= limit {
+            return self.clone();
+        }
+        let width = self.width.min(limit);
+        let height = self.height.min(limit);
+        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            let source_y = (y as u64 * self.height as u64 / height as u64) as u32;
+            for x in 0..width {
+                let source_x = (x as u64 * self.width as u64 / width as u64) as u32;
+                rgba.extend_from_slice(&self.pixel(source_x, source_y));
+            }
+        }
+        Image {
+            width,
+            height,
+            rgba,
+        }
+    }
+}
+
+/// Записать RGBA8 в PNG. Сжатие — несжатые deflate-блоки (stored): файл больше,
+/// зато кодировщик не тянет zlib и не может ошибиться в Хаффмане.
+pub fn encode_rgba(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    let chunk = |out: &mut Vec<u8>, kind: &[u8], body: &[u8]| {
+        out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(body);
+        let crc = crc32(&[kind, body].concat());
+        out.extend_from_slice(&crc.to_be_bytes());
+    };
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+    chunk(&mut out, b"IHDR", &ihdr);
+    // строки с фильтром 0
+    let mut raw = Vec::with_capacity(height as usize * (width as usize * 4 + 1));
+    for y in 0..height as usize {
+        raw.push(0);
+        let line = &rgba[y * width as usize * 4..(y + 1) * width as usize * 4];
+        raw.extend_from_slice(line);
+    }
+    let mut zlib = vec![0x78, 0x01];
+    let mut rest = raw.as_slice();
+    let mut first = true;
+    while !rest.is_empty() || first {
+        first = false;
+        let take = rest.len().min(65535);
+        let (block, tail) = rest.split_at(take);
+        let last = tail.is_empty();
+        zlib.push(if last { 1 } else { 0 });
+        zlib.extend_from_slice(&(block.len() as u16).to_le_bytes());
+        zlib.extend_from_slice(&(!(block.len() as u16)).to_le_bytes());
+        zlib.extend_from_slice(block);
+        rest = tail;
+    }
+    zlib.extend_from_slice(&adler32(&raw).to_be_bytes());
+    chunk(&mut out, b"IDAT", &zlib);
+    chunk(&mut out, b"IEND", &[]);
+    out
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -553,33 +651,24 @@ pub mod tests {
         out
     }
 
-    fn crc32(data: &[u8]) -> u32 {
-        let mut table = [0u32; 256];
-        for (index, slot) in table.iter_mut().enumerate() {
-            let mut value = index as u32;
-            for _ in 0..8 {
-                value = if value & 1 != 0 {
-                    0xedb8_8320 ^ (value >> 1)
-                } else {
-                    value >> 1
-                };
-            }
-            *slot = value;
-        }
-        let mut crc = 0xffff_ffffu32;
-        for &byte in data {
-            crc = table[((crc ^ byte as u32) & 0xff) as usize] ^ (crc >> 8);
-        }
-        crc ^ 0xffff_ffff
+    #[test]
+    fn encoder_round_trips_through_decoder() {
+        let rgba: Vec<u8> = (0..(4 * 4 * 4u32)).map(|index| (index * 7) as u8).collect();
+        let png = encode_rgba(4, 4, &rgba);
+        let image = decode(&png).expect("свой PNG читается своим декодером");
+        assert_eq!((image.width, image.height), (4, 4));
+        assert_eq!(image.rgba, rgba);
     }
 
-    fn adler32(data: &[u8]) -> u32 {
-        let (mut a, mut b) = (1u32, 0u32);
-        for &byte in data {
-            a = (a + byte as u32) % 65521;
-            b = (b + a) % 65521;
-        }
-        (b << 16) | a
+    #[test]
+    fn fit_keeps_aspect_less_than_limit() {
+        let image = Image {
+            width: 100,
+            height: 50,
+            rgba: vec![255; 100 * 50 * 4],
+        };
+        let small = image.fit(48);
+        assert_eq!((small.width, small.height), (48, 48));
     }
 
     #[test]

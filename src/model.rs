@@ -690,26 +690,6 @@ pub fn unescape(text: &str) -> String {
     out
 }
 
-/// Убирает общий ведущий отступ у непустых строк.
-fn dedent(text: &str) -> String {
-    let indent = text
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| line.len() - line.trim_start().len())
-        .min()
-        .unwrap_or(0);
-    text.lines()
-        .map(|line| {
-            if line.len() >= indent {
-                line[indent..].to_string()
-            } else {
-                line.trim_start().to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 pub fn is_style_token(token: &str) -> bool {
     if !token.starts_with('{') || !token.ends_with('}') {
         return false;
