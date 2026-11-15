@@ -1,380 +1,289 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>lazr — RAD for Rust, friendly to AI</title>
-<meta name="description" content="A screen model → real egui/eframe code → build → verification by running. The model is written as line forms or S-expressions; a runtime executes it live.">
+<title>lazr — a screen model instead of UI code</title>
+<meta name="description" content="lazr: describe a screen as data, get a real Rust + egui project, build it and verify it by running. Zero dependencies in the CLI, its own PNG decoder, 42 styles in one line.">
+<meta property="og:title" content="lazr — a screen model instead of UI code">
+<meta property="og:description" content="Data → Rust/egui → run and verify. Own window frame, persistent state, fonts, icons, 42 styles.">
+<meta property="og:image" content="player.png">
 <link rel="icon" href="logo.svg" type="image/svg+xml">
 <style>
   :root{
-    --bg:#0a0c10; --panel:#11151c; --panel2:#161b24; --line:#232b38;
-    --ink:#e8eef7; --muted:#8b96a8; --flame:#f2751f; --amber:#ffb86b;
-    --wire:#69b4ff; --green:#39d353; --red:#e5484d;
+    --bg:#070b12; --panel:#0e1520; --line:#1d2a3a;
+    --ink:#e6edf6; --dim:#8ba0b6; --accent:#22d3ee; --accent2:#7c5cff;
+    --good:#3ddc97; --warn:#ffb86b;
+    --radius:16px; --max:1080px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(1200px 600px at 15% -10%,#1a2230 0%,var(--bg) 55%);
-       color:var(--ink);font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-       -webkit-font-smoothing:antialiased}
-  a{color:var(--wire);text-decoration:none}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink); font-family:var(--font);
+    line-height:1.65; -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(60rem 40rem at 15% -10%, rgba(34,211,238,.14), transparent 60%),
+      radial-gradient(50rem 34rem at 100% 0%, rgba(124,92,255,.14), transparent 55%);
+    background-repeat:no-repeat;
+  }
+  a{color:var(--accent); text-decoration:none}
   a:hover{text-decoration:underline}
-  code,pre{font-family:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,monospace}
-  .wrap{max-width:1060px;margin:0 auto;padding:0 24px}
-  .top{display:flex;justify-content:flex-end;gap:10px;padding-top:18px;font-size:14px;color:var(--muted)}
-  header{padding:40px 0 32px;display:flex;gap:32px;align-items:center;flex-wrap:wrap}
-  header img{width:112px;height:112px;filter:drop-shadow(0 12px 32px rgba(242,117,31,.25))}
-  h1{font-size:clamp(38px,6vw,64px);line-height:1;margin:0 0 12px;letter-spacing:-.02em}
-  h1 span{background:linear-gradient(100deg,var(--amber),var(--flame) 60%,var(--red));
-          -webkit-background-clip:text;background-clip:text;color:transparent}
-  .lead{color:#c3ccdb;font-size:clamp(17px,2vw,21px);max-width:64ch;margin:0}
-  .badges{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
-  .badge{font-size:13px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 12px;background:#0f141b}
-  .badge b{color:var(--ink);font-weight:600}
-  section{padding:44px 0;border-top:1px solid var(--line)}
-  h2{font-size:26px;margin:0 0 6px;letter-spacing:-.01em}
-  .sub{color:var(--muted);margin:0 0 24px}
-  .flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
-  .step{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:18px}
-  .step .n{font:600 12px/1 ui-monospace,monospace;color:var(--flame);letter-spacing:.14em;text-transform:uppercase}
-  .step h3{margin:10px 0 6px;font-size:17px}
-  .step p{margin:0;color:var(--muted);font-size:14px}
-  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  @media (max-width:820px){.cols{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
-  .card .cap{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;
-             border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);background:#0d1218}
-  .card pre{margin:0;padding:16px;overflow:auto;font-size:13.5px;line-height:1.55}
-  .k{color:var(--amber)} .s{color:var(--green)} .c{color:#5f6b7d} .f{color:var(--wire)} .n{color:#d2a8ff}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
-  .feat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
-  .feat h3{margin:0 0 6px;font-size:16px}
-  .feat p{margin:0;color:var(--muted);font-size:14px}
-  .shot{border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.5)}
-  .shot img{display:block;width:100%;height:auto}
-  .honest{background:#1b1310;border:1px solid #3a2318;border-radius:14px;padding:18px 20px}
-  .honest h3{margin:0 0 8px;color:var(--amber);font-size:16px}
-  .honest ul{margin:0;padding-left:20px;color:#cbb8ad;font-size:14.5px}
-  .honest li{margin:6px 0}
-  footer{padding:40px 0 64px;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
-  .links{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
-  .term{background:#0b0f14;border:1px solid var(--line);border-radius:14px;padding:16px 18px;font-size:13.5px;
-        overflow:auto;color:#cfd8e6}
-  .term .ok{color:var(--green)} .term .p{color:var(--flame)}
-  .cta{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:26px 0 6px}
-  .btn{display:inline-block;border:1px solid var(--line);border-radius:10px;padding:11px 18px;font-size:15px;
-       color:var(--ink);background:#121821;text-decoration:none}
-  .btn:hover{border-color:var(--flame);text-decoration:none}
-  .btn.primary{background:linear-gradient(100deg,var(--amber),var(--flame));color:#151006;border-color:transparent;font-weight:600}
-  .cta-note{color:var(--muted);font-size:13px}
-  .hero-shot{margin-top:22px}
-  .nums{width:100%;border-collapse:collapse;font-size:15px;max-width:560px}
-  .nums td{padding:9px 12px;border-bottom:1px solid var(--line);color:var(--muted)}
-  .nums td:last-child{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
-  .nums tr:last-child td{border-bottom:none}
-  .shots{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
-  .shots figure{margin:0}
-  .shots img{width:100%;border:1px solid var(--line);border-radius:14px;display:block}
-  .shots figcaption{color:var(--muted);font-size:13px;padding-top:8px}
-  @media (max-width:820px){.shots{grid-template-columns:1fr}}
-  .demos{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
-  .demo{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
-  .demo h3{margin:0 0 4px;font-size:16px}
-  .demo p{margin:0;color:var(--muted);font-size:13.5px}
-  .demo code{font-size:12.5px;color:var(--amber)}
+  code,kbd{font-family:var(--mono); font-size:.92em}
+  .max{max-width:var(--max); margin:0 auto; padding:0 24px}
+
+  header.nav{position:sticky; top:0; z-index:20; backdrop-filter:blur(14px);
+    background:rgba(7,11,18,.72); border-bottom:1px solid var(--line)}
+  header.nav .inner{display:flex; align-items:center; gap:20px; height:64px}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.02em}
+  .brand svg{width:26px; height:26px}
+  .brand span{font-family:var(--mono); font-size:18px}
+  .nav .links{display:flex; gap:18px; margin-left:auto; font-size:14px; flex-wrap:wrap}
+  .nav .links a{color:var(--dim)}
+  .nav .links a:hover{color:var(--ink); text-decoration:none}
+  .pill{border:1px solid var(--line); border-radius:999px; padding:4px 10px; font-size:12px; color:var(--dim); font-family:var(--mono)}
+
+  .hero{padding:76px 0 40px}
+  .hero .grid{display:grid; grid-template-columns:1.15fr .85fr; gap:40px; align-items:center}
+  .kicker{font-family:var(--mono); font-size:13px; color:var(--accent); letter-spacing:.14em; text-transform:uppercase}
+  h1{font-size:clamp(30px,5vw,54px); line-height:1.06; margin:14px 0 16px; letter-spacing:-.02em}
+  h1 em{font-style:normal; background:linear-gradient(92deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text; background-clip:text; color:transparent}
+  .lead{font-size:18px; color:var(--dim); max-width:56ch}
+  .cta{display:flex; gap:12px; margin-top:26px; flex-wrap:wrap}
+  .btn{display:inline-flex; align-items:center; gap:8px; padding:11px 18px; border-radius:12px;
+    font-weight:600; font-size:15px; border:1px solid var(--line); color:var(--ink); background:var(--panel)}
+  .btn:hover{border-color:var(--accent); text-decoration:none}
+  .btn.primary{background:linear-gradient(92deg,var(--accent),var(--accent2)); border:0; color:#04121a}
+  .shot{border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;
+    box-shadow:0 30px 70px -30px rgba(0,0,0,.9); background:var(--panel)}
+  .shot img{display:block; width:100%; height:auto}
+
+  .stats{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:44px 0 10px}
+  .stat{border:1px solid var(--line); border-radius:14px; padding:16px; background:rgba(14,21,32,.7)}
+  .stat b{display:block; font-size:24px; letter-spacing:-.01em}
+  .stat span{font-size:13px; color:var(--dim)}
+
+  section{padding:56px 0}
+  section h2{font-size:clamp(22px,3vw,32px); margin:0 0 10px; letter-spacing:-.01em}
+  .sub{color:var(--dim); margin:0 0 26px; max-width:70ch}
+
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px}
+  .card{border:1px solid var(--line); border-radius:var(--radius); padding:20px; background:linear-gradient(180deg,rgba(14,21,32,.9),rgba(11,18,32,.65))}
+  .card h3{margin:0 0 8px; font-size:16px; display:flex; align-items:center; gap:8px}
+  .card h3 i{width:8px; height:8px; border-radius:50%; background:var(--accent); display:inline-block}
+  .card p{margin:0; color:var(--dim); font-size:14px}
+
+  .gallery{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px}
+  figure{margin:0; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; background:var(--panel)}
+  figure img{display:block; width:100%; height:auto}
+  figcaption{padding:10px 14px; font-size:13px; color:var(--dim); border-top:1px solid var(--line)}
+  figcaption b{color:var(--ink); font-weight:600}
+
+  pre{margin:0; padding:16px 18px; overflow:auto; background:#060a11; border:1px solid var(--line);
+    border-radius:14px; font-family:var(--mono); font-size:13.5px; line-height:1.6}
+  .cols{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  .term .p{color:var(--accent2)}
+  .term .c{color:#4b6078}
+  .term .s{color:var(--good)}
+
+  .limits{border:1px solid #3a2b16; background:linear-gradient(180deg,rgba(255,184,107,.08),rgba(255,184,107,.02));
+    border-radius:var(--radius); padding:18px 20px}
+  .limits h3{margin:0 0 10px; color:var(--warn); font-size:16px}
+  .limits ul{margin:0; padding-left:20px; color:var(--dim)}
+  .limits li{margin:6px 0}
+
+  footer{border-top:1px solid var(--line); padding:28px 0 40px; color:var(--dim); font-size:14px}
+  footer .row{display:flex; gap:18px; flex-wrap:wrap; align-items:center}
+  footer .row .grow{flex:1}
+  @media(max-width:820px){
+    .hero .grid{grid-template-columns:1fr}
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .cols{grid-template-columns:1fr}
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
 
-<div class="top"><a href="index.html">Русский</a> · <b>English</b></div>
-
-<header>
-  <img src="logo.svg" alt="lazr logo: an S-expression bracket and a lambda inside a window">
-  <div>
-    <h1>la<span>zr</span></h1>
-    <p class="lead">RAD for Rust that is friendly to AI. A screen is described by a model — line forms or
-      S-expressions — and <code>lazr</code> turns it into a real egui/eframe project and verifies it by running.
-      Rust stays the HAL: window, memory, pixels. A runtime can also execute the model live, without a rebuild.</p>
-    <div class="badges">
-      <span class="badge"><b>51</b> tests</span>
-      <span class="badge"><b>0</b> dependencies in the tool</span>
-      <span class="badge">MCP inside</span>
-      <span class="badge">deterministic generation</span>
-      <span class="badge"><b>16</b> demo models</span>
-      <span class="badge">live runtime</span>
+<header class="nav">
+  <div class="max inner">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="#0e1520" stroke="#22d3ee"/><path d="M9 22V9h3.2v10.2H22V22z" fill="#22d3ee"/><circle cx="23" cy="10" r="2.4" fill="#7c5cff"/></svg>
+      <span>lazr</span>
     </div>
+    <nav class="links">
+      <a href="#how">How it works</a>
+      <a href="#demos">Demos</a>
+      <a href="#features">Features</a>
+      <a href="#limits">Limits</a>
+      <a href="#start">Quick start</a>
+      <a href="index.html">RU</a>
+      <a class="pill" href="https://github.com/kostyk348/lazr">GitHub</a>
+    </nav>
   </div>
 </header>
 
-<div class="cta">
-  <a class="btn primary" href="https://github.com/kostyk348/lazr">Open on GitHub →</a>
-  <a class="btn" href="#start">Install in a minute</a>
-  <span class="cta-note">one binary · zero dependencies · no installer needed</span>
+<main>
+<div class="hero">
+  <div class="max grid">
+    <div>
+      <div class="kicker">Rust · egui · zero dependencies in the CLI</div>
+      <h1>Describe a screen as <em>data</em> — get a real app</h1>
+      <p class="lead">lazr turns a window model into a Rust + egui project, builds it and <b>verifies it by running</b>:
+        it renders a frame without a window and executes every action, printing exactly what changed.
+        The model is one file you can read and edit a line at a time.</p>
+      <div class="cta">
+        <a class="btn primary" href="#start">Try it in a minute</a>
+        <a class="btn" href="https://github.com/kostyk348/lazr/releases">Releases</a>
+        <a class="btn" href="index.html">По-русски</a>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>1 file</b><span>a model instead of thousands of lines</span></div>
+        <div class="stat"><b>0</b><span>dependencies in the CLI</span></div>
+        <div class="stat"><b>42</b><span>styles in one line</span></div>
+        <div class="stat"><b>87</b><span>tests and diff checks</span></div>
+      </div>
+    </div>
+    <div class="shot"><img src="player.png" alt="A player built from a model: visualiser, transport, queue"></div>
+  </div>
 </div>
 
-<div class="shot hero-shot"><img src="paint.png" alt="Paint — a whole application described by a model"></div>
+<section id="how">
+  <div class="max">
+    <h2>How it works</h2>
+    <p class="sub">Three steps, each verifiable by a machine. Nothing by eye.</p>
+    <div class="cols">
+      <pre class="term"><span class="c"># 1. the model: window, fields, widgets, handlers</span>
+<span class="p">window</span> "Tasks" 460 520
+<span class="p">store</span> "~/.local/share/lazr/todo.store"
+<span class="p">theme</span> dark accent:#22d3ee panel:#070b12 round:14
+<span class="p">state</span> items list "milk,bread"
+<span class="p">vbox</span>
+  <span class="p">list</span> -&gt; items "empty"
+    <span class="p">hbox</span>
+      <span class="p">label</span> "• {item}" {mono, hint:"a list row"}
+      <span class="p">button</span> "drop" do remove items</pre>
+      <pre class="term"><span class="c"># 2. generate and verify</span>
+<span class="s">$</span> lazr build tasks
+<span class="s">$</span> lazr verify tasks
+headless ok: 3 shapes, 4 widgets in the model
+action "drop": items: [milk, bread] → [bread]
+selftest ok: 1 actions
+result: verified
 
-<section>
-  <h2>Three steps, no mouse dragging</h2>
-  <p class="sub">Lazarus gives a human a canvas. An agent needs a semantic way to change the interface and a
-    verifiable result — so every edit is a named operation on the model.</p>
-  <div class="flow">
-    <div class="step"><div class="n">01 model</div><h3>Forms, not pixels</h3>
-      <p>One line — one widget. Errors come back as data: line, code, hint. Types are checked before compilation.</p></div>
-    <div class="step"><div class="n">02 code</div><h3>Real Rust</h3>
-      <p>Generation is deterministic: one model — one and the same text, so the output lives in git and diffs cleanly.</p></div>
-    <div class="step"><div class="n">03 verify</div><h3>Three facts</h3>
-      <p><code>verify</code> = it builds + it renders headless + every button action is called and does not panic.</p></div>
-  </div>
-</section>
-
-<section>
-  <h2>Speed, measured rather than promised</h2>
-  <p class="sub">Measured on this machine, ordinary disk, warm shared build cache. The first egui build is 17 s;
-    after that everything is milliseconds.</p>
-  <table class="nums">
-    <tr><td>model → code</td><td><b>3 ms</b></td></tr>
-    <tr><td>code → built app</td><td><b>751 ms</b></td></tr>
-    <tr><td>edit the model → rebuild</td><td><b>410 ms</b></td></tr>
-    <tr><td>check the actions</td><td><b>89 ms</b></td></tr>
-    <tr><td>the whole test suite</td><td><b>18 ms</b></td></tr>
-  </table>
-</section>
-
-<section>
-  <h2>Who it is for</h2>
-  <div class="grid">
-    <div class="feat"><h3>Agents and operators</h3><p>The UI is edited by commands and verified without a human:
-      <code>verify</code> prints the effect, not "ok".</p></div>
-    <div class="feat"><h3>Rust GUI developers</h3><p>No <code>ui.horizontal(|ui| {{ … }})</code> per layout row —
-      one model line instead of a block.</p></div>
-    <div class="feat"><h3>Internal tools</h3><p>Dashboards, panels, forms, "an admin page in one evening" —
-      no Electron, no npm.</p></div>
-    <div class="feat"><h3>Minimalists</h3><p>One binary, zero dependencies in the tool, generation without
-      network access.</p></div>
-  </div>
-</section>
-
-<section>
-  <h2>One model, two syntaxes</h2>
-  <p class="sub">Line forms are convenient for point edits; S-expressions are better when a program builds the
-    model — no quoting or ordering traps, one form is one operation, and handlers are forms that can be evaluated.</p>
-  <div class="cols">
-    <div class="card">
-      <div class="cap"><span>form.lazr</span><span>line forms</span></div>
-<pre><span class="k">window</span> <span class="s">"Counter"</span> <span class="n">420x260</span>
-<span class="k">state</span> count <span class="f">int</span> <span class="n">0</span>
-<span class="k">label</span> <span class="s">"Clicks: {count}"</span> <span class="c">{size:22, bold, color:#e5484d}</span>
-<span class="k">button</span> <span class="s">"Plus"</span> <span class="k">do</span> count += 1 <span class="c">{icon:play, key:ctrl+plus}</span>
-<span class="k">place</span> <span class="n">400x200</span>
-  <span class="k">button</span> <span class="s">"Clear"</span> <span class="k">anchor</span> right bottom <span class="k">at</span> <span class="n">16 16</span> <span class="k">size</span> <span class="n">120x32</span></pre>
+<span class="c"># 3. run it</span>
+<span class="s">$</span> lazr run tasks</pre>
     </div>
-    <div class="card">
-      <div class="cap"><span>examples/live-demo.lisp</span><span>S-expressions</span></div>
-<pre>(<span class="k">window</span> <span class="s">"Live model"</span> <span class="n">560</span> <span class="n">420</span>)
-(<span class="k">theme</span> dark :accent <span class="s">"#388bfd"</span> :font <span class="n">14</span>)
-(<span class="k">state</span> count <span class="f">int</span> <span class="n">0</span>)
-(<span class="k">vbox</span>
-  (<span class="k">label</span> <span class="s">"Clicks: {count}"</span> :size <span class="n">22</span> :bold <span class="f">true</span>)
-  (<span class="k">button</span> <span class="s">"Plus"</span> (<span class="k">set!</span> count (<span class="k">+</span> count <span class="n">1</span>)))
-  (<span class="k">slider</span> <span class="s">"limit"</span> :bind limit :range (<span class="n">1</span> <span class="n">20</span>)))</pre>
+    <p class="sub" style="margin-top:22px">The model is read in two syntaxes: line forms (for humans and the CLI) and S-expressions
+      (for programs and agents). <code>lazr live</code> executes the forms directly, without conversion, and shows a window
+      that reloads the file on every change.</p>
+  </div>
+</section>
+
+<section id="demos">
+  <div class="max">
+    <h2>Demos — each built from a model</h2>
+    <p class="sub">No screenshot here is drawn separately: these are windows of real apps produced by <code>lazr build</code>.</p>
+    <div class="gallery">
+      <figure><img src="player.png" alt="Player"><figcaption><b>Player</b> — Frutiger Aero: a visualiser drawn by a Rust widget, glyph transport, a single play/pause button via <code>when … else</code>. 46 model lines, 732 ms to build.</figcaption></figure>
+      <figure><img src="clock.png" alt="Clock"><figcaption><b>Clock</b> — a neon dial drawn entirely by the model's own Rust code: ticks, three hands, digital time, sliders.</figcaption></figure>
+      <figure><img src="cinema.png" alt="Cinema"><figcaption><b>Cinema</b> — a dark cinematic style: timeline, speed, subtitles, a "watched" mark behind a condition.</figcaption></figure>
+      <figure><img src="terminal.png" alt="Terminal"><figcaption><b>Terminal</b> — CRT green on DejaVu Sans Mono: command log, monospaced input, a list row template.</figcaption></figure>
+      <figure><img src="paint.png" alt="Paint"><figcaption><b>Paint</b> — eight tools, palette, undo, flood fill along polylines (BFS), save and open through a system dialog.</figcaption></figure>
+      <figure><img src="dashboard.png" alt="Dashboard"><figcaption><b>Dashboard</b> — absolute layout: three cards, a log, corner buttons, an anchored tooltip.</figcaption></figure>
+      <figure><img src="gate.png" alt="Gate"><figcaption><b>Gate</b> — string comparison: the code "42" opens the panel, a hint appears after three attempts.</figcaption></figure>
+      <figure><img src="checklist.png" alt="Checklist"><figcaption><b>Checklist</b> — a row template: <code>{item}</code>, its own "drop" button, seed items as a comma list.</figcaption></figure>
+      <figure><img src="icons.png" alt="Icons"><figcaption><b>Icons and cards</b> — Font Awesome from an external TTF: glyphs as code points, no images in the repository.</figcaption></figure>
     </div>
   </div>
 </section>
 
-<section>
-  <h2>Live runtime: the model is executed</h2>
-  <p class="sub">One runtime is built once; then it reads the model and re-reads it when the file changes. Handlers
-    are stored as forms and evaluated — not restated as strings — so editing the file changes the window with no
-    recompilation.</p>
-  <div class="term"><span class="p">$</span> lazr live examples/live-demo.lisp --trace
-click «Plus»: count: 0 → 1
-click «Plus»: count: 1 → 2
-
-<span class="p">$</span> lazr live examples/live-demo.lisp --check
-  «Plus»: count: 0 → 1
-  «Minus»: count: 1 → 0
-check ok: 3 actions
-
-<span class="p">$</span> lazr live examples/paint.lisp --problems
-problems: 0
+<section id="features">
+  <div class="max">
+    <h2>Features</h2>
+    <p class="sub">Everything below works in both the generator and the live engine — and is verified by running, not "should work".</p>
+    <div class="cards">
+      <div class="card"><h3><i></i>The window is part of the model</h3><p><code>chrome:own</code> — your own frame with title, close cross and double-click to maximise;
+        plus <code>resizable</code>, <code>topmost</code>, <code>transparent</code>, <code>drag-anywhere</code>, <code>min</code>, <code>max</code>, <code>center</code>.</p></div>
+      <div class="card"><h3><i></i>State between runs</h3><p><code>store "path"</code>: fields are read at start and written on change. Writes are atomic
+        (temp file + <code>rename</code>), and <code>~</code> expands to <code>HOME</code>.</p></div>
+      <div class="card"><h3><i></i>Typography</h3><p>Your own TTF for the whole UI (<code>font-family</code>), monospaced text on a single widget
+        (<code>{mono}</code>), hover tooltips (<code>{hint:"…"}</code>).</p></div>
+      <div class="card"><h3><i></i>Window icon without dependencies</h3><p>Our own PNG decoder: zlib with a full inflate, five filters, palette, 8 and 16 bit.
+        Byte-compared against ImageMagick; the window hands its icon to the manager (<code>_NET_WM_ICON</code>).</p></div>
+      <div class="card"><h3><i></i>42 styles in one line</h3><p>Frutiger Aero, Aqua, Web 2.0, Windows 95, Mac System 7, CRT green, Material 3,
+        Neobrutalism, Cyberpunk, Nord, Catppuccin, Bauhaus… A style is data, not code.</p></div>
+      <div class="card"><h3><i></i>Canonical form and checks</h3><p><code>lazr fmt</code> canonicalises the model (idempotently), <code>verify</code> prints a field diff,
+        and CI builds <b>every</b> model and runs its actions.</p></div>
+      <div class="card"><h3><i></i>Honest errors</h3><p>An error is data: line, code and hint. <code>BAD_EFFECT</code>, <code>ELSE_WITHOUT_WHEN</code>,
+        <code>STORE_NEEDS_PATH</code> — each tells you what to write instead.</p></div>
+      <div class="card"><h3><i></i>MCP server inside</h3><p><code>lazr mcp</code> gives an agent tools: show the model, add a widget, build, verify —
+        instead of talking about architecture.</p></div>
+    </div>
   </div>
 </section>
 
-<section>
-  <h2>Layout with numbers, theme in one line</h2>
-  <p class="sub"><code>place</code> is a fixed-size area with absolute points, explicit sizes and right/bottom
-    anchors — a form, but in text. A theme is a single line: dark or light base, accent, font, spacing, radius.</p>
-  <div class="shot"><img src="dashboard.png" alt="Dashboard window: three cards in a row, a journal below, buttons in the corners"></div>
-</section>
-
-<section id="icon">
-  <h2>A window icon with our own decoder</h2>
-  <p class="sub"><code>window-icon "icon.png"</code> — the PNG is read by a decoder built on <code>std</code> alone:
-    zlib with a full inflate, five filters, palette, 8 and 16 bit. No <code>image</code>, no <code>flate2</code>.</p>
-  <div class="term"><span class="p">window-icon</span> "icon.png"
-<span class="p">lazr png</span> icon.png --raw icon.rgba   <span class="c"># compare with convert icon.png rgba:-</span></div>
-  <p class="sub">Verified: byte-identical output against ImageMagick for four PNG kinds, and a built window hands
-    its icon to the manager — <code>xprop _NET_WM_ICON</code> prints <code>Icon (48 x 48)</code>.</p>
-</section>
-
-<section id="store">
-  <h2>Data between runs</h2>
-  <p class="sub">An app remembers its fields instead of only drawing them: <code>store "path"</code> reads
-    values at start and writes on every change. Writes are atomic: temp file plus rename.</p>
-  <div class="term"><span class="p">store</span> "~/.local/share/lazr/todo.store"</div>
-  <p class="sub">Verified by running: two <code>--selftest</code> runs give <code>1 → 2</code>, then
-    <code>2 → 3</code>, and the file holds <code>3</code>. <code>lazr live --check</code> reads the same file.</p>
-</section>
-
-<section id="text">
-  <h2>Your own font, mono and tooltips</h2>
-  <p class="sub">The text font is a model line. Monospace is switched per widget, and a tooltip lives in the same
-    style block as size and colour.</p>
-  <div class="term"><span class="p">font-family</span> "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
-<span class="p">label</span> "term@lazr" {mono, hint:"hover me"}</div>
-  <p class="sub">The built-in font stays as a fallback, so Cyrillic and rare glyphs never turn into boxes.
-    The "Terminal" demo is built exactly like this — and its log really is monospaced.</p>
-</section>
-
-<section id="window">
-  <h2>Your own window frame</h2>
-  <p class="sub">The window is part of the model. The system frame can be switched off, and then the app draws
-    its own title and close cross; plus "always on top", a fixed size, size limits and dragging by any point.</p>
-  <div class="term"><span class="p">window</span> "Player" 480 520 chrome:own topmost:yes drag-anywhere:yes min:420x460</div>
-  <p class="sub">Verified by hand: no system title bar, a click on the app's own cross terminates the process, and
-    <code>lazr live</code> draws the same frame as the built app.</p>
-</section>
-
-<section id="styles">
-  <h2>42 styles, one line each</h2>
-  <p class="sub">A style is data. The repo ships <code>skills/design-styles/SKILL.md</code>:
-    Frutiger Aero, Aqua, Web 2.0, Windows 95, Mac System 7, CRT green, Material 3, Neobrutalism,
-    Cyberpunk, Nord, Catppuccin, Bauhaus and three dozen more — each with a ready line you paste
-    into a model as is.</p>
-  <div class="term"><span class="p">theme</span> light accent:#00a2e8 panel:#e6f2f9 card:#ffffff muted:#2f4c5c font:14 spacing:8 round:12</div>
-  <p class="sub">Keys: <code>dark|light</code>, <code>accent</code>, <code>panel</code> (window fill),
-    <code>card</code> (card fill), <code>muted</code> (secondary text and lines), <code>font</code>,
-    <code>spacing</code>, <code>round</code>. lazr has no gradients, shadows or blur — a style rests on
-    palette, shape and rhythm, and that limit is stated out loud.</p>
-</section>
-
-<section>
-  <h2>Demos</h2>
-  <p class="sub">Every demo is a model file, and every one is verified by scripts — not by eyeballs.</p>
-  <div class="demos">
-        <div class="demo"><h3>Player</h3><p>Frutiger Aero: a <code>rust-widget</code> visualiser,
-      glyph transport, a single play/pause button via <code>when … else</code>, a queue.</p>
-      <code>examples/player.lisp · 46 lines · 732 ms to build</code></div>
-    <div class="demo"><h3>Cinema</h3><p>A dark cinematic style: timeline, speed, subtitles, a
-      "watched" mark behind a condition.</p><code>examples/cinema.lisp · 41 lines · 708 ms</code></div>
-    <div class="demo"><h3>Terminal</h3><p>CRT green: command log, input, a row template, seeded list
-      items.</p><code>examples/terminal.lisp · 24 lines · 700 ms</code></div>
-    <div class="demo"><h3>Paint</h3><p>Eight tools, palette, undo, contour flood fill, save/open through a system dialog.</p><code>examples/paint.lisp</code></div>
-    <div class="demo"><h3>Dashboard</h3><p>Absolute layout: three cards, a journal, corner buttons, anchored hint.</p><code>examples/dashboard.lisp</code></div>
-    <div class="demo"><h3>Budget</h3><p>Arithmetic in handlers: <code>(set! total (* total 2))</code>, a step slider.</p><code>examples/calc.lisp</code></div>
-    <div class="demo"><h3>Settings</h3><p>Light theme, checkbox, slider, text input, reset via <code>do</code>.</p><code>examples/settings.lisp</code></div>
-    <div class="demo"><h3>Access</h3><p>String comparison and conditionally shown panels: <code>when code == "42"</code>.</p><code>examples/gate.lisp</code></div>
-    <div class="demo"><h3>Thermostat</h3><p>Numbers and thresholds: "hot"/"normal" panels via <code>when … else</code>.</p><code>examples/thermostat.lisp</code></div>
-    <div class="demo"><h3>Icons</h3><p>Font Awesome from an external TTF plus cards: glyphs as code points,
-      no images in the repo.</p><code>examples/icons.lisp</code></div>
-    <div class="demo"><h3>Checklist</h3><p>Row template: <code>{item}</code>, its own "remove" button, seeded
-      items.</p><code>examples/checklist.lisp</code></div>
-    <div class="demo"><h3>Tasks</h3><p>A list of strings: <code>append</code>, <code>remove</code>,
-      <code>clear</code>, a text input and counters.</p><code>examples/todo.lisp</code></div>
-    <div class="demo"><h3>Quiz</h3><p>Score and attempts counters, several handlers per row.</p><code>examples/quiz.lisp</code></div>
-    <div class="demo"><h3>Live model</h3><p>The runtime showcase: edit the file, the window follows.</p><code>examples/live-demo.lisp</code></div>
-  </div>
-</section>
-
-<section>
-  <h2>Packaging</h2>
-  <p class="sub">One command puts a binary, an icon rendered from the logo, a <code>.desktop</code> entry and a
-    tarball into <code>dist/</code>. There is no installer and no signature — an honest boundary, not a forgotten
-    checkbox.</p>
-  <div class="term"><span class="p">$</span> lazr package /tmp/paint --release
-binary: /tmp/paint/dist/kraski
-icon:   /tmp/paint/dist/icon.png
-entry:  /tmp/paint/dist/kraski.desktop
-archive:/tmp/paint/dist/kraski-release.tar.gz</div>
-</section>
-
-<section>
-  <h2>What is inside</h2>
-  <div class="grid">
-    <div class="feat"><h3>Layout</h3><p><code>vbox</code>, <code>hbox</code>, <code>grid N</code>,
-      <code>scroll</code>, <code>space</code> and <code>place</code> with absolute points, sizes and anchors.</p></div>
-    <div class="feat"><h3>Style and theme</h3><p>Size, weight, colour, padding, alignment, stretch; theme with a
-      base, accent, font, spacing and radius.</p></div>
-    <div class="feat"><h3>Icons and shortcuts</h3><p>A built-in set of safe glyphs (no tofu: arrows and
-      geometric shapes were dropped after a frame check) and <code>:key "ctrl+s"</code>-style shortcuts.</p></div>
-    <div class="feat"><h3>Custom widgets</h3><p><code>rust widget</code> + <code>custom</code>: arbitrary egui
-      code where the DSL ends — and it is still checked by the headless frame.</p></div>
-    <div class="feat"><h3>Action language</h3><p><code>if</code>, comparisons, arithmetic over fields,
-      increments; types are checked before <code>cargo build</code>.</p></div>
-    <div class="feat"><h3>Conditions</h3><p><code>when … else</code> shows children by a condition: number and
-      string comparisons, a bare boolean field. Type errors before the build.</p></div>
-    <div class="feat"><h3>Icons and cards</h3><p>Any external TTF: <code>icon-font "path.ttf"</code> and
-      glyphs as code points. <code>card</code> brings fill, border, rounding and padding.</p></div>
-    <div class="feat"><h3>Lists</h3><p>A <code>list</code> field, seeded items, row templates
-      (<code>{item}</code> plus its own "remove" button), three operations type-checked before the build.</p></div>
-    <div class="feat"><h3>Verification</h3><p><code>verify</code>, <code>live --check</code>,
-      <code>live --problems</code>, <code>--trace</code> and two GUI scripts that measure pixels and files.</p></div>
-  </div>
-</section>
-
-<section>
-  <h2>Honestly, what is missing</h2>
-  <div class="honest">
-    <h3>Not done yet</h3>
-    <ul>
-      <li><b>Lazarus-grade layout</b> — absolute points and two anchors exist; percentages, Qt-style edge
-        constraints and reflow on resize do not.</li>
-      <li><b>CSS-grade styles</b> — no custom font files, shadows or background images.</li>
-      <li><b>Handlers beyond expressions</b> — function calls and lists are missing: anything more moves into
-        <code>rust widget</code>, and then it is no longer the model.</li>
-      <li><b>Model history</b> — git exists; built-in undo/branching of the model does not.</li>
-      <li><b>Packaging</b> — no installer and no signature: a signature needs keys, not a checkbox.</li>
-      <li><b>Runtime parity</b> — <code>custom</code> widgets cannot work live (they are Rust code); the runtime
-        honestly shows a placeholder saying a build is required.</li>
-    </ul>
-  </div>
-  <div class="shots">
-    <figure><img src="terminal.png" alt="Terminal: CRT green, command log, row template"><figcaption>Terminal — CRT green: log, input, row template</figcaption></figure>
-    <figure><img src="cinema.png" alt="Cinema: dark style, timeline, subtitles"><figcaption>Cinema — a dark cinematic style</figcaption></figure>
-    <figure><img src="player.png" alt="Player: visualiser, transport, queue"><figcaption>Player — a Rust-widget visualiser and glyph transport</figcaption></figure>
-    <figure><img src="gate.png" alt="Access: a panel gated by a condition"><figcaption>Access — string comparison and gated panels</figcaption></figure>
-    <figure><img src="thermostat.png" alt="Thermostat: thresholds and the else branch"><figcaption>Thermostat — numbers, thresholds and <code>when … else</code></figcaption></figure>
-    <figure><img src="checklist.png" alt="Checklist: a list row template"><figcaption>Checklist — row template: <code>{item}</code> and its own button</figcaption></figure>
-    <figure><img src="icons.png" alt="Font Awesome icons and cards"><figcaption>Icons from an external TTF, and cards</figcaption></figure>
+<section id="limits">
+  <div class="max">
+    <h2>Limits, stated out loud</h2>
+    <p class="sub">Honesty beats marketing: this is what lazr does not do.</p>
+    <div class="limits">
+      <h3>Not supported</h3>
+      <ul>
+        <li><b>Gradients, shadows, blur</b> inside the app UI: egui draws flat. A style rests on palette, shape and rhythm.</li>
+        <li><b>Custom widgets in the live engine</b>: <code>rust-widget</code> is Rust, so <code>lazr live</code> shows an honest placeholder.</li>
+        <li><b>Installers and signing</b>: <code>lazr package</code> produces a <code>tar.gz</code> + <code>.desktop</code> + icon, not a <code>.deb</code> and not a signature.</li>
+        <li><b>PNG interlacing (Adam7)</b> and depths below 8 bit — such files are rejected with a readable message.</li>
+        <li><b>Loops and function calls in handlers</b>: one action has assignments, arithmetic, <code>if/else</code>, <code>append/remove/clear</code>.</li>
+      </ul>
+    </div>
   </div>
 </section>
 
 <section id="start">
-  <h2>Try it</h2>
-  <div class="term"><span class="p">$</span> git clone https://github.com/kostyk348/lazr &amp;&amp; cd lazr
-<span class="p">$</span> cargo install --path .
-<span class="p">$</span> lazr live examples/live-demo.lisp
-<span class="p">$</span> lazr lisp examples/paint.lisp --to /tmp/paint
-<span class="p">$</span> lazr verify /tmp/paint
-<span class="p">$</span> hermes mcp add lazr --command lazr --args mcp
+  <div class="max">
+    <h2>Quick start</h2>
+    <p class="sub">You only need Rust. No Python, no node, no system libraries for the CLI itself.</p>
+    <div class="cols">
+      <pre class="term"><span class="c"># install from source</span>
+git clone https://github.com/kostyk348/lazr
+cd lazr &amp;&amp; cargo build --release
+install -Dm755 target/release/lazr ~/.local/bin/lazr
+
+<span class="c"># and the first window</span>
+lazr new hello --title "Hello" --size 380x240
+lazr state hello count int 0
+lazr add hello label "Clicks: {count}"
+lazr add hello button "Plus" --do "count += 1"
+lazr run hello</pre>
+      <pre class="term"><span class="c"># the whole CLI</span>
+lazr new | state | add | show      the model
+lazr build | run | headless        build and launch
+lazr verify                        build + frame + all actions
+lazr lisp FILE | live FILE         S-expressions and the live engine
+lazr fmt FILE|DIR --check          canonical model text
+lazr png FILE --raw OUT            our own PNG decoder
+lazr package                       binary, desktop entry, icon
+lazr mcp                           server for an agent</pre>
+    </div>
+    <p class="sub" style="margin-top:22px">The model is plain text, so it lives in git and reads well in a diff. That also means an agent
+      can generate, verify and rewrite the UI without opening an IDE.</p>
   </div>
 </section>
+</main>
 
 <footer>
-  <div>lazr — MIT. Part of a series: <a href="https://github.com/kostyk348/stigmergy">stigmergy</a>,
-    <a href="https://github.com/kostyk348/chereda">chereda</a>,
-    <a href="https://github.com/kostyk348/proof">proof</a>,
-    <a href="https://github.com/kostyk348/homeostat">homeostat</a>.</div>
-  <div class="links">
-    <a href="https://github.com/kostyk348/lazr/blob/master/docs/DESIGN.md">design tokens</a>
-    <a href="https://github.com/kostyk348/lazr/blob/master/README.en.md">README (EN)</a>
-    <a href="README.md">Русский</a>
-    <a href="https://github.com/kostyk348/lazr/tree/master/examples">examples</a>
-    <a href="https://github.com/kostyk348/lazr/actions">CI</a>
+  <div class="max row">
+    <span>lazr · MIT · a screen model instead of UI code</span>
+    <span class="grow"></span>
+    <a href="https://github.com/kostyk348/lazr">GitHub</a>
+    <a href="https://github.com/kostyk348/lazr/releases">Releases</a>
+    <a href="https://github.com/kostyk348/lazr/blob/master/CHANGELOG.md">Changelog</a>
+    <a href="https://github.com/kostyk348/lazr/blob/master/README.md">README (RU)</a>
+    <a href="index.html">По-русски</a>
   </div>
 </footer>
 
-</div>
 </body>
 </html>

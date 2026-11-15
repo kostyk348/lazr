@@ -16,14 +16,21 @@
 <p align="center">
   <a href="https://github.com/kostyk348/lazr/actions"><img src="https://github.com/kostyk348/lazr/actions/workflows/tests.yml/badge.svg" alt="CI"></a>
   <a href="https://kostyk348.github.io/lazr/"><img src="https://img.shields.io/badge/страница-lazr-ffb86b" alt="страница"></a>
-  <img src="https://img.shields.io/badge/тесты-51%20зелёных-39d353" alt="51 тест">
+  <img src="https://img.shields.io/badge/тесты-87%20зелёных-39d353" alt="87 тестов">
   <img src="https://img.shields.io/badge/зависимости-0%20в%20инструменте-388bfd" alt="0 зависимостей">
-  <img src="https://img.shields.io/badge/демки-16%20моделей-ffb86b" alt="16 демок">
+  <img src="https://img.shields.io/badge/демки-20%20моделей-ffb86b" alt="20 демок">
   <img src="https://img.shields.io/badge/license-MIT-8b949e" alt="MIT">
 </p>
 
 <p align="center">
-  <img src="docs/paint.png" alt="Краски — приложение, целиком описанное моделью" width="760">
+  <img src="docs/player.png" alt="Плеер — приложение, целиком описанное моделью" width="330">
+  <img src="docs/clock.png" alt="Часы — циферблат нарисован Rust-кодом модели" width="330">
+  <img src="docs/terminal.png" alt="Терминал на моноширинном шрифте" width="330">
+</p>
+
+<p align="center">
+  <sub>Плеер, Часы и Терминал — три стиля, три разных приложения, каждый — один файл модели.
+  Больше скриншотов и живые подробности — <a href="https://kostyk348.github.io/lazr/">на странице</a>.</sub>
 </p>
 
 ---

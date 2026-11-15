@@ -1550,7 +1550,7 @@ fn chrome_function(screen: &Screen) -> String {
 fn titlebar(ui: &mut egui::Ui, title: &str) {{
     let height = 30.0;
     let rect = egui::Rect::from_min_size(ui.max_rect().min, egui::vec2(ui.available_width(), height));
-    let drag = ui.interact(rect, egui::Id::new("lazr:titlebar"), egui::Sense::click_and_drag());
+    let drag = ui.interact(rect, ui.id().with("lazr:titlebar"), egui::Sense::click_and_drag());
     if drag.drag_started() {{
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }}
@@ -1583,7 +1583,7 @@ fn titlebar(ui: &mut egui::Ui, title: &str) {{
         ui.ctx()
             .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
     }}
-    if ui.interact(close, egui::Id::new("lazr:close"), egui::Sense::click()).clicked() {{
+    if ui.interact(close, ui.id().with("lazr:close"), egui::Sense::click()).clicked() {{
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
     }}
     ui.add_space(height);
@@ -1603,12 +1603,12 @@ fn chrome_call(screen: &Screen) -> String {
     }
     if screen.window.drag_anywhere {
         code.push_str(
-            "    if ui.interact(ui.max_rect(), egui::Id::new(\"lazr:drag\"), egui::Sense::drag()).drag_started() {\n        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);\n    }\n",
+            "    if ui.interact(ui.max_rect(), ui.id().with(\"lazr:drag\"), egui::Sense::drag()).drag_started() {\n        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);\n    }\n",
         );
     }
     if screen.window.center {
         code.push_str(&format!(
-            "    if !ui.data(|data| data.get_temp::<bool>(egui::Id::new(\"lazr:centered\")).unwrap_or(false)) {{\n        if let Some(monitor) = ui.ctx().input(|input| input.viewport().monitor_size) {{\n            ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2((monitor.x - {}f32) / 2.0, (monitor.y - {}f32) / 2.0)));\n            ui.data_mut(|data| data.insert_temp(egui::Id::new(\"lazr:centered\"), true));\n        }}\n    }}\n",
+            "    if !ui.data(|data| data.get_temp::<bool>(ui.id().with(\"lazr:centered\")).unwrap_or(false)) {{\n        if let Some(monitor) = ui.ctx().input(|input| input.viewport().monitor_size) {{\n            ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2((monitor.x - {}f32) / 2.0, (monitor.y - {}f32) / 2.0)));\n            ui.data_mut(|data| data.insert_temp(egui::Id::new(\"lazr:centered\"), true));\n        }}\n    }}\n",
             float_lit(screen.width as f32),
             float_lit(screen.height as f32)
         ));

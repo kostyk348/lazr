@@ -16,14 +16,21 @@
 <p align="center">
   <a href="https://github.com/kostyk348/lazr/actions"><img src="https://github.com/kostyk348/lazr/actions/workflows/tests.yml/badge.svg" alt="CI"></a>
   <a href="https://kostyk348.github.io/lazr/index.en.html"><img src="https://img.shields.io/badge/site-lazr-ffb86b" alt="site"></a>
-  <img src="https://img.shields.io/badge/tests-51%20green-39d353" alt="51 tests">
+  <img src="https://img.shields.io/badge/tests-87%20green-39d353" alt="87 tests">
   <img src="https://img.shields.io/badge/dependencies-0%20in%20the%20tool-388bfd" alt="0 dependencies">
-  <img src="https://img.shields.io/badge/demos-16%20models-ffb86b" alt="16 demos">
+  <img src="https://img.shields.io/badge/demos-20%20models-ffb86b" alt="20 demos">
   <img src="https://img.shields.io/badge/license-MIT-8b949e" alt="MIT">
 </p>
 
 <p align="center">
-  <img src="docs/paint.png" alt="Paint — a whole application described by a model" width="760">
+  <img src="docs/player.png" alt="Player — an app described entirely by a model" width="330">
+  <img src="docs/clock.png" alt="Clock — the dial is drawn by the model's Rust code" width="330">
+  <img src="docs/terminal.png" alt="Terminal on a monospaced font" width="330">
+</p>
+
+<p align="center">
+  <sub>Player, Clock and Terminal — three styles, three apps, each one model file.
+  More screenshots on <a href="https://kostyk348.github.io/lazr/index.en.html">the site</a>.</sub>
 </p>
 
 ---

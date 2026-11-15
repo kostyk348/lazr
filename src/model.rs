@@ -798,6 +798,36 @@ fn parse_style(text: &str) -> Result<Style, String> {
     Ok(style)
 }
 
+/// Сколько фигурных скобок добавляет строка Rust (вне строк и комментариев).
+fn net_braces(line: &str) -> i32 {
+    let mut depth = 0i32;
+    let mut chars = line.chars().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+    while let Some(ch) = chars.next() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if ch == '/' && chars.peek() == Some(&'/') {
+            break;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            _ => {}
+        }
+    }
+    depth
+}
+
 pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
     let mut errors: Vec<ModelError> = Vec::new();
     let mut screen = Screen {
@@ -913,16 +943,24 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     body.push_str(inner);
                 }
             }
+            // Блок rust держится на балансе фигурных скобок, а не на «строка ровно }»:
+            // внутри кода бывают замыкания и if/else, чья } стоит в начале строки.
+            let mut depth = if closed { 0 } else { 1 };
             while !closed && index < lines.len() {
                 let next = lines[index];
                 index += 1;
                 let next_indent = next.len() - next.trim_start().len();
-                if next.trim() == "}" && next_indent <= indent {
+                if next.trim() == "}" && depth == 1 && next_indent <= indent {
                     closed = true;
                     break;
                 }
                 body.push_str(next);
                 body.push('\n');
+                depth += net_braces(next);
+                if depth <= 0 {
+                    closed = true;
+                    break;
+                }
             }
             if !closed {
                 errors.push(ModelError {
