@@ -179,6 +179,10 @@ pub enum WidgetKind {
     When,
     /// Ветка «иначе»: не самостоятельный виджет, а дети when.
     Else,
+    /// Карточка: рамка с фоном, обводкой и внутренними отступами.
+    Card,
+    /// Иконка из подключённого шрифта: текст виджета — сам глиф.
+    Icon,
     Custom(String),
 }
 
@@ -200,6 +204,8 @@ impl WidgetKind {
             WidgetKind::List => "list",
             WidgetKind::When => "when",
             WidgetKind::Else => "else",
+            WidgetKind::Card => "card",
+            WidgetKind::Icon => "icon",
             WidgetKind::Else => "else",
             WidgetKind::Custom(_) => "custom",
         }
@@ -215,6 +221,7 @@ impl WidgetKind {
                 | WidgetKind::When
                 | WidgetKind::Else
                 | WidgetKind::List
+                | WidgetKind::Card
         )
     }
     pub fn parse_kind(text: &str) -> Option<WidgetKind> {
@@ -234,6 +241,8 @@ impl WidgetKind {
             "list" => WidgetKind::List,
             "when" => WidgetKind::When,
             "else" => WidgetKind::Else,
+            "card" => WidgetKind::Card,
+            "icon" => WidgetKind::Icon,
             "else" => WidgetKind::Else,
             _ => return None,
         })
@@ -255,6 +264,8 @@ impl WidgetKind {
             "list",
             "when",
             "else",
+            "card",
+            "icon",
             "custom",
         ]
     }
@@ -385,6 +396,8 @@ pub struct Screen {
     pub rust: Vec<RustBlock>,
     pub rust_fields: Vec<RustField>,
     pub theme: Theme,
+    /// Внешний TTF-шрифт с иконками (Font Awesome, Material Symbols, …).
+    pub icon_font: Option<String>,
     pub root: Vec<Widget>,
 }
 
@@ -435,11 +448,16 @@ fn tokens(line: &str) -> Vec<(String, bool)> {
     let mut depth = 0;
     for ch in line.chars() {
         if escaped {
-            current.push(match ch {
-                'n' => '\n',
-                't' => '\t',
-                other => other,
-            });
+            match ch {
+                'n' => current.push('\n'),
+                't' => current.push('\t'),
+                // «\uXXXX» сохраняем целиком: его разбирает unescape()
+                'u' => {
+                    current.push('\\');
+                    current.push('u');
+                }
+                other => current.push(other),
+            }
             escaped = false;
             continue;
         }
@@ -500,6 +518,49 @@ pub fn parse_style_text(text: &str) -> Result<Style, String> {
 }
 
 /// Стиль — это `{ключ:значение, …}`, а не блок кода `{ count = 0 }`.
+/// `\uf00c` и `\u{1f600}` → настоящий символ.
+///
+/// Приватные глифы иконок руками не набрать, а копипаст их теряет — в модели
+/// поэтому пишут кодемпоинт, а в виджет попадает символ.
+pub fn unescape(text: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && chars.get(i + 1) == Some(&'u') {
+            if chars.get(i + 2) == Some(&'{') {
+                let mut j = i + 3;
+                let mut hex = String::new();
+                while j < chars.len() && chars[j] != '}' {
+                    hex.push(chars[j]);
+                    j += 1;
+                }
+                if j < chars.len() {
+                    if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                        if let Some(ch) = char::from_u32(code) {
+                            out.push(ch);
+                            i = j + 1;
+                            continue;
+                        }
+                    }
+                }
+            } else if i + 5 < chars.len() {
+                let hex: String = chars[i + 2..i + 6].iter().collect();
+                if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                    if let Some(ch) = char::from_u32(code) {
+                        out.push(ch);
+                        i += 6;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 pub fn is_style_token(token: &str) -> bool {
     if !token.starts_with('{') || !token.ends_with('}') {
         return false;
@@ -577,6 +638,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         rust: Vec::new(),
         rust_fields: Vec::new(),
         theme: Theme::default(),
+        icon_font: None,
         root: Vec::new(),
     };
     let lines: Vec<&str> = text.lines().collect();
@@ -757,6 +819,20 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                 }
                 screen.theme = theme;
             }
+            "icon-font" | "icon_font" => {
+                match words.get(1) {
+                    Some(path) => {
+                        screen.icon_font = Some(path.trim_matches('"').to_string());
+                    }
+                    None => errors.push(ModelError {
+                        line: line_no,
+                        code: "ICON_FONT_NEEDS_PATH",
+                        message: "у icon-font нет пути к файлу".into(),
+                        hint: "icon-font \"/usr/share/fonts/TTF/fa-solid-900.ttf\"".into(),
+                    }),
+                }
+                continue;
+            }
             "state" => {
                 if words.len() < 3 {
                     errors.push(ModelError {
@@ -896,6 +972,12 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                 while stack.len() > 1 && stack.last().map(|(d, _)| *d >= depth).unwrap_or(false) {
                     stack.pop();
                 }
+                // у иконки текст — глиф, записанный кодемпоинтом
+                let text = if kind == WidgetKind::Icon {
+                    unescape(&text)
+                } else {
+                    text.clone()
+                };
                 let mut widget = if kind.is_container() {
                     Widget::container(kind.clone())
                 } else if matches!(kind, WidgetKind::Custom(_)) {
@@ -1185,6 +1267,9 @@ pub fn render(screen: &Screen) -> String {
             field.ty.as_str(),
             field.value
         ));
+    }
+    if let Some(path) = &screen.icon_font {
+        out.push_str(&format!("icon-font {}\n", quote(path)));
     }
     for field in &screen.rust_fields {
         out.push_str(&format!(
@@ -1530,5 +1615,29 @@ theme dark accent:#388bfd font:16 spacing:12 round:10
         assert_eq!(node.kind, WidgetKind::List);
         assert_eq!(node.text, "пусто");
         assert_eq!(node.children.len(), 1);
+    }
+
+    #[test]
+    fn icon_font_card_and_icon_escape() {
+        let screen = parse(
+            "icon-font \"/usr/share/fonts/TTF/fa-solid-900.ttf\"\ncard\n  icon \"\\uf00c\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            screen.icon_font.as_deref(),
+            Some("/usr/share/fonts/TTF/fa-solid-900.ttf")
+        );
+        let card = &screen.root[0];
+        assert_eq!(card.kind, WidgetKind::Card);
+        assert_eq!(card.children[0].kind, WidgetKind::Icon);
+        // кодемпоинт превратился в настоящий глиф
+        assert_eq!(card.children[0].text, "\u{f00c}");
+    }
+
+    #[test]
+    fn unescape_supports_braces_and_plain() {
+        assert_eq!(unescape("\\uf00c"), "\u{f00c}");
+        assert_eq!(unescape("\\u{1f600}"), "\u{1f600}");
+        assert_eq!(unescape("без кодов"), "без кодов");
     }
 }

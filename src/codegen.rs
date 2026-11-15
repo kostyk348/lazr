@@ -344,7 +344,32 @@ fn theme_code(screen: &Screen) -> String {
         .as_deref()
         .and_then(color_code)
         .unwrap_or_else(|| "egui::Color32::from_rgb(56, 139, 253)".to_string());
-    format!(
+    // Подключённый TTF с иконками: семейство «icons», глифы берём из него.
+    let icon_font = match &screen.icon_font {
+        Some(path) => format!(
+            r#"
+/// Подключённый шрифт иконок (модель: icon-font "{path}").
+fn apply_icon_font(ctx: &egui::Context) {{
+    let path = "{path}";
+    match std::fs::read(path) {{
+        Ok(bytes) => ctx.add_font(egui::FontInsert::new(
+            "icons",
+            egui::FontData::from_owned(bytes),
+            vec![egui::InsertFontFamily {{
+                family: egui::FontFamily::Name("icons".into()),
+                priority: egui::FontPriority::Highest,
+            }}],
+        )),
+        Err(err) => eprintln!("иконки: не прочитать {{path}}: {{err}}"),
+    }}
+}}
+"#,
+            path = path.replace('\\', "\\\\").replace('"', "\\\"")
+        ),
+        None => String::new(),
+    };
+
+    let code = format!(
         r#"
 fn apply_theme(ctx: &egui::Context) {{
     ctx.set_theme(egui::ThemePreference::{});
@@ -396,7 +421,28 @@ fn apply_theme(ctx: &egui::Context) {{
                 .text_styles
                 .insert(text_style, egui::FontId::proportional(size));
         }}
+        // Аккуратные состояния кнопок: подсветка в цвет акцента, а не серая.
+        style.visuals.widgets.hovered.bg_fill = accent.gamma_multiply(0.28);
+        style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, accent);
+        style.visuals.widgets.active.bg_fill = accent.gamma_multiply(0.42);
+        style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, accent);
+        style.visuals.widgets.inactive.bg_fill = if dark {{
+            egui::Color32::from_rgb(26, 31, 40)
+        }} else {{
+            egui::Color32::from_rgb(238, 241, 246)
+        }};
+        style.visuals.panel_fill = if dark {{
+            egui::Color32::from_rgb(10, 12, 16)
+        }} else {{
+            egui::Color32::from_rgb(250, 251, 253)
+        }};
+        style.visuals.window_fill = style.visuals.panel_fill;
+        // Текст на подсвеченной кнопке должен читаться.
+        style.visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, on_accent);
+        style.visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, on_accent);
+        style.spacing.interact_size.y = font * 1.9;
     }});
+    {{icon_font_call}}
 }}
 "#,
         if theme.dark { "Dark" } else { "Light" },
@@ -404,7 +450,37 @@ fn apply_theme(ctx: &egui::Context) {{
         theme.round,
         float_lit(theme.spacing),
         float_lit(theme.font)
+    );
+    format!(
+        "{icon_font}{}",
+        with_icon_font(code, screen.icon_font.is_some())
     )
+}
+
+fn with_icon_font(code: String, has_font: bool) -> String {
+    if has_font {
+        code.replace("{icon_font_call}", "apply_icon_font(ctx);")
+    } else {
+        code.replace("{icon_font_call}", "")
+    }
+}
+
+fn card_helpers() -> String {
+    r#"
+/// Карточка: фон, рамка, скругление и внутренние отступы из темы.
+fn card_frame(ui: &egui::Ui, pad: f32) -> egui::Frame {
+    let visuals = ui.visuals();
+    egui::Frame::new()
+        .fill(visuals.faint_bg_color)
+        .stroke(egui::Stroke::new(
+            1.0,
+            visuals.widgets.noninteractive.bg_stroke.color,
+        ))
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(pad)
+}
+"#
+    .to_string()
 }
 
 fn shortcut_helpers() -> String {
@@ -706,6 +782,36 @@ fn emit_widget(
         WidgetKind::Else => {
             return Err("«else» без when: ветка должна идти сразу после when".to_string());
         }
+        WidgetKind::Card => {
+            // Карточка: фон, рамка, скругление и отступы — из общего помощника.
+            let pad_px = widget.style.pad.unwrap_or(12.0);
+            let body = emit_widgets(&widget.children, screen, depth + 1, emit)?;
+            out.push_str(&format!(
+                "{pad}card_frame(ui, {}).show(ui, |ui| {{\n{pad}    ui.set_width(ui.available_width());\n{body}{pad}}});\n",
+                float_lit(pad_px)
+            ));
+        }
+        WidgetKind::Icon => {
+            // Глиф из подключённого шрифта. Без шрифта это был бы «тофу» — говорим прямо.
+            if screen.icon_font.is_none() {
+                return Err(
+                    "иконке нужен шрифт: добавьте строку icon-font \"/путь/к/icons.ttf\""
+                        .to_string(),
+                );
+            }
+            let size = widget.style.size.unwrap_or(18.0);
+            let mut rich = format!(
+                "egui::RichText::new({}).family(egui::FontFamily::Name(\"icons\".into())).size({})",
+                rust_string(&widget.text),
+                float_lit(size)
+            );
+            if let Some(color) = &widget.style.color {
+                if let Some(code) = color_code(color) {
+                    rich.push_str(&format!(".color({code})"));
+                }
+            }
+            out.push_str(&format!("{pad}ui.label({rich});\n"));
+        }
         WidgetKind::Hbox => {
             let body = emit_widgets(&widget.children, screen, depth + 1, emit)?;
             out.push_str(&format!("{pad}ui.horizontal(|ui| {{\n{body}{pad}}});\n"));
@@ -938,7 +1044,7 @@ pub fn main_rs(screen: &Screen, _bin_name: &str) -> Result<String, String> {
 use eframe::egui;
 #[allow(unused_imports)]
 use eframe::egui::NumExt;
-{helpers}{theme}
+{helpers}{card_helpers}{theme}
 #[derive(Debug, Clone)]
 pub struct State {{
 {state_fields}}}
@@ -1037,6 +1143,7 @@ fn main() {{
 "#,
         count = count_widgets(&screen.root),
         helpers = shortcut_helpers(),
+        card_helpers = card_helpers(),
         theme = theme_code(screen),
         actions_code = actions_code,
         actions_table = actions_table,
@@ -1225,5 +1332,16 @@ checkbox "Согласен" -> agree
             crate::model::parse("state items list\nbutton \"x\" do remove items\n").unwrap();
         let err = main_rs(&screen, "app").unwrap_err();
         assert!(err.contains("шаблоне строки"), "{err}");
+    }
+
+    #[test]
+    fn icon_requires_font_and_card_wraps_children() {
+        let screen = crate::model::parse("state n int 0\ncard\n  label \"внутри\"\n").unwrap();
+        let code = main_rs(&screen, "app").unwrap();
+        assert!(code.contains("card_frame(ui,"), "{code}");
+
+        let no_font = crate::model::parse("icon \"\\uf00c\"\n").unwrap();
+        let err = main_rs(&no_font, "app").unwrap_err();
+        assert!(err.contains("icon-font"), "{err}");
     }
 }

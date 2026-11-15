@@ -92,6 +92,8 @@ impl Default for Theme {
 }
 
 struct Model {
+    /// Подключённый TTF с иконками.
+    icon_font: Option<String>,
     theme: Theme,
     title: String,
     width: u32,
@@ -142,6 +144,7 @@ fn parse_any(text: &str) -> (Model, Vec<String>) {
 fn parse_model(text: &str) -> (Model, Vec<String>) {
     let mut problems: Vec<String> = Vec::new();
     let mut model = Model {
+        icon_font: None,
         theme: Theme::default(),
         title: "Окно".into(),
         width: 520,
@@ -153,7 +156,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
     let mut stack: Vec<(usize, Vec<usize>)> = vec![(0, Vec::new())];
     let known = [
         "label", "button", "checkbox", "text_input", "slider", "space", "separator", "vbox", "hbox", "grid",
-        "scroll", "place", "list", "when", "else", "custom",
+        "scroll", "place", "list", "when", "else", "card", "icon", "custom",
     ];
     let mut in_rust = false;
     // глубина фигурных скобок внутри блока rust: внутри бывают свои «}»,
@@ -231,6 +234,12 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                 model.fields.push((name, value));
                 continue;
             }
+            "icon-font" | "icon_font" => {
+                if let Some(path) = words.get(1) {
+                    model.icon_font = Some(unquote(path));
+                }
+                continue;
+            }
             "theme" => {
                 for word in words.iter().skip(1) {
                     let (key, value) = match word.split_once(':') {
@@ -304,7 +313,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
         };
         let container = matches!(
             head.as_str(),
-            "vbox" | "hbox" | "grid" | "scroll" | "place" | "when" | "list"
+            "vbox" | "hbox" | "grid" | "scroll" | "place" | "when" | "list" | "card"
         );
         if head == "when" {
             // условие — всё до первого стиля
@@ -871,6 +880,7 @@ fn read_form(chars: &[char], index: &mut usize) -> Result<Option<Sexp>, String> 
 fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
     let mut problems = Vec::new();
     let mut model = Model {
+        icon_font: None,
         theme: Theme::default(),
         title: "Окно".into(),
         width: 520,
@@ -926,6 +936,12 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
                     _ => Value::Text(args.get(2).and_then(Sexp::text).unwrap_or_default()),
                 };
                 model.fields.push((name, value));
+            }
+            "icon-font" | "icon_font" => {
+                if let Some(path) = args.first().and_then(Sexp::text) {
+                    model.icon_font = Some(path);
+                }
+                continue;
             }
             "theme" => {
                 for item in args {
@@ -1010,7 +1026,7 @@ fn build_node(
     };
     let container = matches!(
         head,
-        "vbox" | "hbox" | "grid" | "scroll" | "place" | "when" | "else" | "list"
+        "vbox" | "hbox" | "grid" | "scroll" | "place" | "when" | "else" | "list" | "card"
     );
     let mut index = 0;
     if head == "when" {
@@ -1188,7 +1204,8 @@ fn build_node(
     if !matches!(
         kind.as_str(),
         "label" | "button" | "checkbox" | "text_input" | "slider" | "space" | "separator" | "vbox"
-            | "hbox" | "grid" | "scroll" | "place" | "list" | "when" | "else" | "custom"
+            | "hbox" | "grid" | "scroll" | "place" | "list" | "when" | "else" | "card" | "icon"
+            | "custom"
     ) {
         return Err(format!("форма «{head}» рантайму неизвестна"));
     }
@@ -1338,6 +1355,21 @@ fn eval_expr_sexp(state: &HashMap<String, Value>, form: &Sexp) -> f32 {
                 _ => left,
             }
         }
+    }
+}
+
+/// Шрифт иконок из модели: семейство «icons».
+fn apply_icon_font(ctx: &egui::Context, path: &str) {
+    match std::fs::read(path) {
+        Ok(bytes) => ctx.add_font(egui::FontInsert::new(
+            "icons",
+            egui::FontData::from_owned(bytes),
+            vec![egui::InsertFontFamily {
+                family: egui::FontFamily::Name("icons".into()),
+                priority: egui::FontPriority::Highest,
+            }],
+        )),
+        Err(err) => eprintln!("иконки: не прочитать {path}: {err}"),
     }
 }
 
@@ -1626,6 +1658,33 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
                 }
             }
         }
+        "card" => {
+            egui::Frame::new()
+                .fill(ui.visuals().faint_bg_color)
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    ui.visuals().widgets.noninteractive.bg_stroke.color,
+                ))
+                .corner_radius(egui::CornerRadius::same(12))
+                .inner_margin(node.number.unwrap_or(12.0))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    for child in &node.children {
+                        draw_node(ui, child, state);
+                    }
+                });
+        }
+        "icon" => {
+            // глиф из подключённого шрифта иконок
+            let size = node.size.unwrap_or(18.0);
+            let mut rich = egui::RichText::new(node.text.clone())
+                .family(egui::FontFamily::Name("icons".into()))
+                .size(size);
+            if let Some(color) = &node.color {
+                rich = rich.color(hex_color(color));
+            }
+            ui.label(rich);
+        }
         "custom" => {
             // Свой виджет — это Rust-код, ему нужна сборка. В рантайме честно говорим об этом,
             // а не пропускаем молча.
@@ -1672,6 +1731,7 @@ struct LiveApp {
     state: HashMap<String, Value>,
     modified: Option<SystemTime>,
     applied_theme: Option<Theme>,
+    applied_icon_font: Option<String>,
 }
 
 impl LiveApp {
@@ -1710,6 +1770,13 @@ impl eframe::App for LiveApp {
         if self.applied_theme.as_ref() != Some(&wanted) {
             apply_theme(ui.ctx(), &wanted);
             self.applied_theme = Some(wanted);
+        }
+        // шрифт иконок ставим один раз на путь
+        if self.applied_icon_font.as_ref() != self.model.icon_font.as_ref() {
+            if let Some(path) = self.model.icon_font.clone() {
+                apply_icon_font(ui.ctx(), &path);
+            }
+            self.applied_icon_font = self.model.icon_font.clone();
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(400));
         ui.label(
@@ -1759,6 +1826,7 @@ fn main() {
     let height = model.height as f32 + 44.0;
     let title = model.title.clone();
     let mut app = LiveApp {
+        applied_icon_font: None,
         path: path.clone(),
         model,
         problems,

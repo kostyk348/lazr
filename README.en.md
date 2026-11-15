@@ -93,7 +93,8 @@ hermes mcp add lazr --command lazr --args mcp
 |---|---|
 | Layout | `vbox`, `hbox`, `grid N`, `scroll`, `space`, `place` with absolute points, sizes and anchors |
 | Style | size, weight, colour, padding, alignment, stretch; theme in one line (dark/light, accent, font, radius) |
-| Widgets | `label`, `button`, `checkbox`, `text_input`, `slider`, `separator`, `space`, `list`, `custom` |
+| Widgets | `label`, `button`, `checkbox`, `text_input`, `slider`, `separator`, `space`, `list`, `card`, `icon`, `custom` |
+| Icons | any external TTF: `icon-font "path.ttf"` + glyphs as code points `icon "\uf00c"` |
 | State | `int`, `float`, `bool`, `string`, `list` (a list of strings with delete) |
 | Logic | `if/else`, comparisons (strings included), arithmetic, `append/remove/clear`, `when … else` in layout |
 | Verification | `verify`, `live --check`, `--problems`, `--trace`, two adversarial GUI scripts |
@@ -137,6 +138,7 @@ Model → live application. Every demo is machine-checked: `--problems` = 0, `ve
 | `dashboard.lisp` | Dashboard: absolute `place` layout, anchors, theme, cards |
 | `todo.lisp` / `.lazr` | Tasks: a list of strings, `append`/`remove`/`clear`, text input, counters |
 | `checklist.lisp` / `.lazr` | Checklist: a row template with `{item}` and its own "remove" button, seeded items |
+| `icons.lisp` | Font Awesome icons and cards: glyphs as code points, no images in the repo |
 | `gate.lisp` / `.lazr` | Access: string comparison and conditionally shown panels |
 | `thermostat.lisp` | Thermostat: numbers, thresholds and `when … else` |
 | `calc.lisp` | Budget: arithmetic in handlers (`*`, `/`), step slider |
@@ -150,6 +152,30 @@ Model → live application. Every demo is machine-checked: `--problems` = 0, `ve
 </p>
 <p align="center">
   <img src="docs/checklist.png" alt="Checklist: a list row template" width="420">
+</p>
+
+## Icons from an external font, and cards
+
+Icons are not drawn into the repository: the model points at **any TTF** (Font Awesome, Material Symbols,
+Bootstrap Icons) and takes glyphs from it. A glyph is written as a code point — private-use characters are
+impossible to type by hand:
+
+```lisp
+(icon-font "/usr/share/fonts/TTF/fa-solid-900.ttf")
+(card
+  (hbox
+    (icon "\uf00c" :size 20 :color "#39d353")
+    (label "done" :size 15 :grow true)))
+```
+
+- `\uf00c` and `\u{1f600}` are decoded into the real character (`unescape`);
+- `icon` without `icon-font` is a build error ("this icon needs a font"), not a tofu square;
+- the font is loaded at startup (`ctx.add_font`, family `icons`), so the path stays a path instead of a
+  compiled-in asset;
+- `card` is a container with a fill, a border, rounding and padding, so cards on screen look like cards.
+
+<p align="center">
+  <img src="docs/icons.png" alt="Font Awesome icons in a model, plus cards" width="520">
 </p>
 
 ## Lists and row templates

@@ -84,6 +84,24 @@ jobs:
           cargo run -q -- build /tmp/when-gen
           cargo run -q -- headless /tmp/when-gen | tee /tmp/when-gen/out.txt
           grep -q '1 фигур' /tmp/when-gen/out.txt
+      - name: внешние иконки и карточки (кодогенерация)
+        run: |
+          mkdir -p /tmp/icons-ci
+          printf 'window "И" 400 300\nicon-font "/usr/share/fonts/TTF/fa-solid-900.ttf"\nstate n int 0\ncard\n  hbox\n    icon "\\uf00c"\n    label "готово"\n' > /tmp/icons-ci/form.lazr
+          cargo run -q -- build /tmp/icons-ci
+          grep -q 'add_font' /tmp/icons-ci/app/src/main.rs
+          grep -q 'FontFamily::Name("icons"' /tmp/icons-ci/app/src/main.rs
+          grep -q 'card_frame(ui,' /tmp/icons-ci/app/src/main.rs
+          cargo run -q -- headless /tmp/icons-ci
+      - name: icon без icon-font — понятная ошибка
+        run: |
+          mkdir -p /tmp/icon-bad
+          printf 'window "И" 400 300\nicon "\\uf00c"\n' > /tmp/icon-bad/form.lazr
+          if cargo run -q -- build /tmp/icon-bad > /tmp/icon-bad/out.txt 2>&1; then
+            echo "ожидали ошибку, а сборка прошла"
+            exit 1
+          fi
+          grep -q 'icon-font' /tmp/icon-bad/out.txt
       - name: шаблон строки и начальные элементы
         run: |
           mkdir -p /tmp/row-ci

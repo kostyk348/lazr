@@ -144,11 +144,16 @@ fn tokenize(source: &str) -> Result<Vec<Placed>, LispError> {
                 while i < chars.len() && chars[i] != '"' {
                     if chars[i] == '\\' && i + 1 < chars.len() {
                         i += 1;
-                        text.push(match chars[i] {
-                            'n' => '\n',
-                            't' => '\t',
-                            other => other,
-                        });
+                        match chars[i] {
+                            'n' => text.push('\n'),
+                            't' => text.push('\t'),
+                            // «\uXXXX» оставляем как есть: глиф разбирает unescape()
+                            'u' => {
+                                text.push('\\');
+                                text.push('u');
+                            }
+                            other => text.push(other),
+                        }
                     } else {
                         text.push(chars[i]);
                     }
@@ -254,6 +259,7 @@ pub fn eval(forms: &[Value]) -> Result<Evaluated, LispError> {
             rust: Vec::new(),
             rust_fields: Vec::new(),
             theme: Default::default(),
+            icon_font: None,
             root: vec![Widget::container(WidgetKind::Vbox)],
         },
         env: HashMap::new(),
@@ -318,6 +324,14 @@ impl Builder {
                 })?;
                 let value = args.get(2).and_then(Value::text).unwrap_or_default();
                 self.screen.fields.push(Field { name, ty, value });
+                Ok(None)
+            }
+            "icon-font" | "icon_font" => {
+                let path = args
+                    .first()
+                    .and_then(Value::text)
+                    .ok_or_else(|| LispError::new("(icon-font \"путь.ttf\")", "путь к шрифту иконок"))?;
+                self.screen.icon_font = Some(path);
                 Ok(None)
             }
             "theme" => {
@@ -436,12 +450,13 @@ impl Builder {
                 Ok(None)
             }
             "label" | "button" | "checkbox" | "text-input" | "slider" | "space" | "separator"
-            | "vbox" | "hbox" | "grid" | "scroll" | "place" | "list" | "when" | "custom" => {
+            | "vbox" | "hbox" | "grid" | "scroll" | "place" | "list" | "when" | "card" | "icon"
+            | "custom" => {
                 self.node(&head, args)
             }
             other => Err(LispError::new(
                 format!("форма «{other}» неизвестна"),
-                "window, state, label, button, checkbox, text-input, slider, space, separator, vbox, hbox, grid, scroll, custom, rust-init, rust-widget",
+                "window, state, icon-font, theme, label, button, checkbox, text-input, slider, space, separator, vbox, hbox, grid, scroll, place, list, when, card, icon, custom, rust-init, rust-widget, rust-field, rust-item",
             )),
         }
     }
@@ -462,6 +477,8 @@ impl Builder {
             "place" => WidgetKind::Place,
             "list" => WidgetKind::List,
             "when" => WidgetKind::When,
+            "card" => WidgetKind::Card,
+            "icon" => WidgetKind::Icon,
             "custom" => WidgetKind::Custom(
                 args.first()
                     .and_then(Value::text)
@@ -476,6 +493,15 @@ impl Builder {
         };
 
         let mut index = 0;
+        // У иконки текст — кодемпоинт глифа: (icon "\uf00c")
+        if head == "icon" {
+            if let Some(first) = args.first() {
+                if let Some(text) = first.text() {
+                    widget.text = crate::model::unescape(&text);
+                    index = 1;
+                }
+            }
+        }
         // У list текст — это подпись пустого списка; строки шаблона — дети.
         if head == "list" {
             if let Some(Value::Str(text)) = args.first() {

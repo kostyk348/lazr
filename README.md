@@ -93,7 +93,8 @@ hermes mcp add lazr --command lazr --args mcp
 |---|---|
 | Раскладка | `vbox`, `hbox`, `grid N`, `scroll`, `space`, `place` с абсолютными точками, размерами и якорями |
 | Стиль | размер, жирность, цвет, отступы, выравнивание, растяжение; тема строкой (тёмная/светлая, акцент, кегль, радиус) |
-| Виджеты | `label`, `button`, `checkbox`, `text_input`, `slider`, `separator`, `space`, `list`, `custom` |
+| Виджеты | `label`, `button`, `checkbox`, `text_input`, `slider`, `separator`, `space`, `list`, `card`, `icon`, `custom` |
+| Иконки | внешний TTF: `icon-font "путь.ttf"` + глифы кодемпоинтом `icon "\uf00c"` |
 | Состояние | `int`, `float`, `bool`, `string`, `list` (список строк с удалением) |
 | Логика | `if/else`, сравнения (включая строки), арифметика, `append/remove/clear`, `when … else` в раскладке |
 | Проверка | `verify`, `live --check`, `--problems`, `--trace`, два состязательных скрипта для GUI |
@@ -138,6 +139,7 @@ else
 | `dashboard.lisp` | Пульт: абсолютная раскладка `place`, якоря, тема, карточки |
 | `todo.lisp` / `.lazr` | Задачи: список строк, `append`/`remove`/`clear`, поле ввода, счётчики |
 | `checklist.lisp` / `.lazr` | Чек-лист: шаблон строки с `{item}` и своей кнопкой «убрать», начальные элементы |
+| `icons.lisp` | Иконки из Font Awesome и карточки: глифы кодемпоинтом, без картинок в репозитории |
 | `gate.lisp` / `.lazr` | Доступ: сравнение строк и панели по условию |
 | `thermostat.lisp` | Термостат: числа, пороги и `when … else` |
 | `calc.lisp` | Смета: арифметика в обработчиках (`*`, `/`), ползунок шага |
@@ -151,6 +153,29 @@ else
 </p>
 <p align="center">
   <img src="docs/checklist.png" alt="Чек-лист: шаблон строки списка" width="420">
+</p>
+
+## Иконки из внешнего шрифта и карточки
+
+Иконки не нарисованы в репозитории: модель подключает **любой TTF** (Font Awesome, Material Symbols,
+Bootstrap Icons) и берёт глифы из него. Глиф задаётся кодемпоинтом — приватные символы руками не набрать:
+
+```lisp
+(icon-font "/usr/share/fonts/TTF/fa-solid-900.ttf")
+(card
+  (hbox
+    (icon "\uf00c" :size 20 :color "#39d353")
+    (label "готово" :size 15 :grow true)))
+```
+
+- `\uf00c` и `\u{1f600}` разбираются в настоящий символ (`unescape`);
+- `icon` без `icon-font` — ошибка сборки «иконке нужен шрифт», а не квадрат-тофу;
+- шрифт читается при запуске (`ctx.add_font`, семейство `icons`), поэтому путь остаётся путём, а не
+  вкомпилированным ресурсом;
+- `card` — контейнер с фоном, рамкой, скруглением и отступами: карточки на экране выглядят как карточки.
+
+<p align="center">
+  <img src="docs/icons.png" alt="Иконки Font Awesome в модели и карточки" width="520">
 </p>
 
 ## Списки и шаблон строки
