@@ -218,6 +218,8 @@ problems: 0
     <div class="demo"><h3>Settings</h3><p>Light theme, checkbox, slider, text input, reset via <code>do</code>.</p><code>examples/settings.lisp</code></div>
     <div class="demo"><h3>Access</h3><p>String comparison and conditionally shown panels: <code>when code == "42"</code>.</p><code>examples/gate.lisp</code></div>
     <div class="demo"><h3>Thermostat</h3><p>Numbers and thresholds: "hot"/"normal" panels via <code>when … else</code>.</p><code>examples/thermostat.lisp</code></div>
+    <div class="demo"><h3>Checklist</h3><p>Row template: <code>{item}</code>, its own "remove" button, seeded
+      items.</p><code>examples/checklist.lisp</code></div>
     <div class="demo"><h3>Tasks</h3><p>A list of strings: <code>append</code>, <code>remove</code>,
       <code>clear</code>, a text input and counters.</p><code>examples/todo.lisp</code></div>
     <div class="demo"><h3>Quiz</h3><p>Score and attempts counters, several handlers per row.</p><code>examples/quiz.lisp</code></div>
@@ -252,8 +254,8 @@ archive:/tmp/paint/dist/kraski-release.tar.gz</div>
       increments; types are checked before <code>cargo build</code>.</p></div>
     <div class="feat"><h3>Conditions</h3><p><code>when … else</code> shows children by a condition: number and
       string comparisons, a bare boolean field. Type errors before the build.</p></div>
-    <div class="feat"><h3>Lists</h3><p>A <code>list</code> field, a widget with rows and delete, three
-      operations (<code>append</code>, <code>remove</code>, <code>clear</code>) type-checked before the build.</p></div>
+    <div class="feat"><h3>Lists</h3><p>A <code>list</code> field, seeded items, row templates
+      (<code>{item}</code> plus its own "remove" button), three operations type-checked before the build.</p></div>
     <div class="feat"><h3>Verification</h3><p><code>verify</code>, <code>live --check</code>,
       <code>live --problems</code>, <code>--trace</code> and two GUI scripts that measure pixels and files.</p></div>
   </div>

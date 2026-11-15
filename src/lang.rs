@@ -476,6 +476,13 @@ impl Builder {
         };
 
         let mut index = 0;
+        // У list текст — это подпись пустого списка; строки шаблона — дети.
+        if head == "list" {
+            if let Some(Value::Str(text)) = args.first() {
+                widget.text = text.clone();
+                index = 1;
+            }
+        }
         // У when первый аргумент — условие формой, а не подпись.
         if head == "when" {
             let cond = args.first().ok_or_else(|| {
@@ -547,7 +554,12 @@ impl Builder {
                                 branch.children.push(w);
                             }
                         }
-                        widget.children.push(branch);
+                        // (else …) сразу после (when …) относится к нему, а не к родителю
+                        if matches!(widget.children.last(), Some(w) if w.kind == WidgetKind::When) {
+                            widget.children.last_mut().unwrap().children.push(branch);
+                        } else {
+                            widget.children.push(branch);
+                        }
                         i += 1;
                         continue;
                     }
@@ -664,6 +676,8 @@ impl Builder {
     ) -> Result<(), LispError> {
         match key {
             "bind" => widget.bind = value.text(),
+            // подпись пустого списка
+            "empty" => widget.text = value.text().unwrap_or_default(),
             // Действие можно задать и строкой — тем же языком, что и в строчной модели.
             "do" => widget.effect = value.text(),
             "at" => {
@@ -781,6 +795,8 @@ fn handler(form: &Value) -> Result<String, LispError> {
                 .ok_or_else(|| LispError::new(format!("({word} список …)"), "имя списка"))?;
             match word.as_str() {
                 "clear" => Ok(format!("clear {name}")),
+                // (remove items) без индекса — удалить текущую строку шаблона
+                "remove" if items.get(2).is_none() => Ok(format!("remove {name}")),
                 _ => {
                     let value = items.get(2).ok_or_else(|| {
                         LispError::new(format!("({word} список значение)"), "что положить")
@@ -981,5 +997,18 @@ mod tests {
             .children
             .iter()
             .any(|c| c.kind == crate::model::WidgetKind::Else));
+    }
+
+    #[test]
+    fn row_template_forms() {
+        let forms = crate::lang::read(
+            "(window \"П\" 400 300)\n(state items list \"a,b\")\n(list :bind items :empty \"пусто\"\n  (label \"• {item}\"))\n",
+        )
+        .unwrap();
+        let model = crate::lang::eval(&forms).unwrap();
+        let node = &model.screen.root[0];
+        assert_eq!(node.kind, crate::model::WidgetKind::List);
+        assert_eq!(node.text, "пусто");
+        assert_eq!(node.children.len(), 1);
     }
 }

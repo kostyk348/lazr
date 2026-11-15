@@ -84,6 +84,24 @@ jobs:
           cargo run -q -- build /tmp/when-gen
           cargo run -q -- headless /tmp/when-gen | tee /tmp/when-gen/out.txt
           grep -q '1 фигур' /tmp/when-gen/out.txt
+      - name: шаблон строки и начальные элементы
+        run: |
+          mkdir -p /tmp/row-ci
+          printf 'window "С" 420 300\nstate items list "молоко,хлеб"\nvbox\n  list -> items "пусто"\n    hbox\n      label "• {item}"\n      button "убрать" do remove items\n' > /tmp/row-ci/form.lazr
+          cargo run -q -- build /tmp/row-ci
+          cargo run -q -- headless /tmp/row-ci | tee /tmp/row-ci/out.txt
+          grep -q '6 фигур' /tmp/row-ci/out.txt
+          cargo run -q -- live /tmp/row-ci/form.lazr --headless | tee /tmp/row-ci/live.txt
+          grep -q '6 фигур' /tmp/row-ci/live.txt
+      - name: «remove items» вне шаблона — понятная ошибка
+        run: |
+          mkdir -p /tmp/row-bad
+          printf 'window "С" 420 300\nstate items list\nbutton "x" do remove items\n' > /tmp/row-bad/form.lazr
+          if cargo run -q -- build /tmp/row-bad > /tmp/row-bad/out.txt 2>&1; then
+            echo "ожидали ошибку, а сборка прошла"
+            exit 1
+          fi
+          grep -q 'шаблоне строки' /tmp/row-bad/out.txt
       - name: списки работают в сгенерированном приложении
         run: |
           cargo run -q -- lisp examples/todo.lisp --to /tmp/ci-todo

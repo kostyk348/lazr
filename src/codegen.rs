@@ -140,6 +140,10 @@ fn field_type(screen: &Screen, name: &str) -> Option<FieldType> {
 }
 
 fn text_expr(text: &str, screen: &Screen) -> String {
+    text_expr_row(text, screen, false)
+}
+
+fn text_expr_row(text: &str, screen: &Screen, row: bool) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut args: Vec<String> = Vec::new();
     let mut current = String::new();
@@ -155,6 +159,12 @@ fn text_expr(text: &str, screen: &Screen) -> String {
                     break;
                 }
                 name.push(next);
+            }
+            if closed && row && name == "item" {
+                parts.push(current.clone());
+                current.clear();
+                args.push("item".to_string());
+                continue;
             }
             if closed {
                 if let Some(field) = screen.fields.iter().find(|f| f.name == name) {
@@ -493,6 +503,8 @@ struct Emit {
     counter: usize,
     /// (имя кнопки, код действия) в порядке появления
     actions: Vec<(String, String)>,
+    /// Мы внутри шаблона строки списка: {item} — это текущая строка.
+    row: bool,
 }
 
 impl Emit {
@@ -541,12 +553,34 @@ fn emit_widget(
     let mut out = String::new();
     match &widget.kind {
         WidgetKind::Label => {
-            let text = styled_text(&text_expr(&widget.text, screen), widget);
+            let text = styled_text(&text_expr_row(&widget.text, screen, emit.row), widget);
             out.push_str(&format!("{pad}ui.label({text});\n"));
         }
         WidgetKind::Button => {
-            let text = styled_text(&text_expr(&widget.text, screen), widget);
+            let text = styled_text(&text_expr_row(&widget.text, screen, emit.row), widget);
             if let Some(effect) = &widget.effect {
+                // В шаблоне строки «remove items» (без индекса) — это «удалить эту строку».
+                if !emit.row {
+                    if let Some(rest) = effect.trim().strip_prefix("remove ") {
+                        if rest.split_whitespace().count() == 1 {
+                            return Err(format!(
+                                "«{}» без индекса работает только в шаблоне строки списка",
+                                effect.trim()
+                            ));
+                        }
+                    }
+                }
+                if emit.row {
+                    if let Some(rest) = effect.trim().strip_prefix("remove ") {
+                        let parts: Vec<&str> = rest.split_whitespace().collect();
+                        if parts.len() == 1 {
+                            out.push_str(&format!(
+                                "{pad}if ui.button({text}).clicked() {{\n{pad}    remove_row = Some(i);\n{pad}}}\n"
+                            ));
+                            return Ok(out);
+                        }
+                    }
+                }
                 let code = expr::compile(screen, effect)
                     .map_err(|err| format!("{}: {}", err.message, err.hint))?;
                 let action = emit.action(&widget.text, code);
@@ -580,7 +614,7 @@ fn emit_widget(
             if ty != FieldType::Bool {
                 return Err(format!("checkbox привязан к {field}: нужен bool"));
             }
-            let text = styled_text(&text_expr(&widget.text, screen), widget);
+            let text = styled_text(&text_expr_row(&widget.text, screen, emit.row), widget);
             out.push_str(&format!("{pad}ui.checkbox(&mut state.{field}, {text});\n"));
         }
         WidgetKind::TextInput => {
@@ -737,8 +771,9 @@ fn emit_widget(
             ));
         }
         WidgetKind::List => {
-            // Список строк: подпись + удаление у каждой строки. Клик по «✖» убирает
-            // элемент по индексу, поэтому идём по копии — иначе заимствование спорит.
+            // Список строк. Без детей — подпись + «✖»; с детьми — шаблон строки,
+            // в котором {item} это текущая строка, а действие «remove items»
+            // удаляет именно её.
             let field = widget
                 .bind
                 .clone()
@@ -758,9 +793,33 @@ fn emit_widget(
                 widget.text.clone()
             };
             out.push_str(&format!(
-                "{pad}if state.{field}.is_empty() {{\n{pad}    ui.label(egui::RichText::new({}).size(12.0).color(egui::Color32::from_gray(160)));\n{pad}}} else {{\n{pad}    let rows = state.{field}.clone();\n{pad}    for (i, item) in rows.iter().enumerate() {{\n{pad}        ui.horizontal(|ui| {{\n{pad}            ui.label(item);\n{pad}            if ui.small_button(\"✖\").clicked() && i < state.{field}.len() {{\n{pad}                state.{field}.remove(i);\n{pad}            }}\n{pad}        }});\n{pad}    }}\n{pad}}}\n",
+                "{pad}if state.{field}.is_empty() {{\n{pad}    ui.label(egui::RichText::new({}).size(12.0).color(egui::Color32::from_gray(160)));\n{pad}}} else {{\n",
                 rust_string(&empty_text)
             ));
+            out.push_str(&format!("{pad}    let rows = state.{field}.clone();\n"));
+            out.push_str(&format!(
+                "{pad}    let mut remove_row: Option<usize> = None;\n"
+            ));
+            out.push_str(&format!(
+                "{pad}    for (i, item) in rows.iter().enumerate() {{\n{pad}        ui.horizontal(|ui| {{\n"
+            ));
+            if widget.children.is_empty() {
+                out.push_str(&format!("{pad}            ui.label(item);\n"));
+                out.push_str(&format!(
+                    "{pad}            if ui.small_button(\"✖\").clicked() {{\n{pad}                remove_row = Some(i);\n{pad}            }}\n"
+                ));
+            } else {
+                let was_row = emit.row;
+                emit.row = true;
+                let body = emit_widgets(&widget.children, screen, depth + 3, emit)?;
+                emit.row = was_row;
+                out.push_str(&body);
+            }
+            out.push_str(&format!("{pad}        }});\n{pad}    }}\n"));
+            out.push_str(&format!(
+                "{pad}    if let Some(row) = remove_row {{\n{pad}        if row < state.{field}.len() {{\n{pad}            state.{field}.remove(row);\n{pad}        }}\n{pad}    }}\n"
+            ));
+            out.push_str(&format!("{pad}}}\n"));
         }
         WidgetKind::Custom(name) => {
             out.push_str(&format!("{pad}widget_{name}(state, ui);\n"));
@@ -784,8 +843,16 @@ fn default_expr(ty: &FieldType, value: &str) -> String {
         },
         FieldType::Int => value.parse::<i64>().unwrap_or(0).to_string(),
         FieldType::Float => float_lit(value.parse::<f32>().unwrap_or(0.0)),
-        // список всегда начинается пустым: начальные элементы задаются действиями
-        FieldType::List => "Vec::new()".to_string(),
+        // начальные элементы перечисляются через запятую в одной строке
+        FieldType::List => {
+            let items: Vec<String> = value
+                .split(',')
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(|item| format!("{}.to_string()", rust_string(item)))
+                .collect();
+            format!("vec![{}]", items.join(", "))
+        }
     }
 }
 
@@ -1134,5 +1201,29 @@ checkbox "Согласен" -> agree
         let code = main_rs(&screen, "app").unwrap();
         assert!(code.contains("if state.n > 2 {"), "{code}");
         assert!(code.contains("} else {"), "{code}");
+    }
+
+    #[test]
+    fn list_row_template_and_seed_code() {
+        let screen = crate::model::parse(
+            "state items list \"молоко,хлеб\"\nlist -> items\n  hbox\n    label \"• {item}\"\n    button \"убрать\" do remove items\n",
+        )
+        .unwrap();
+        let code = main_rs(&screen, "app").unwrap();
+        assert!(
+            code.contains("vec![\"молоко\".to_string(), \"хлеб\".to_string()]"),
+            "{code}"
+        );
+        assert!(code.contains("for (i, item)"), "{code}");
+        assert!(code.contains("format!(\"• {}\", item)"), "{code}");
+        assert!(code.contains("remove_row = Some(i)"), "{code}");
+    }
+
+    #[test]
+    fn row_remove_without_index_is_rejected_outside_template() {
+        let screen =
+            crate::model::parse("state items list\nbutton \"x\" do remove items\n").unwrap();
+        let err = main_rs(&screen, "app").unwrap_err();
+        assert!(err.contains("шаблоне строки"), "{err}");
     }
 }

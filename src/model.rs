@@ -214,6 +214,7 @@ impl WidgetKind {
                 | WidgetKind::Place
                 | WidgetKind::When
                 | WidgetKind::Else
+                | WidgetKind::List
         )
     }
     pub fn parse_kind(text: &str) -> Option<WidgetKind> {
@@ -253,7 +254,6 @@ impl WidgetKind {
             "place",
             "list",
             "when",
-            "else",
             "else",
             "custom",
         ]
@@ -587,7 +587,11 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         let line_no = index + 1;
         let line = lines[index].trim_end();
         index += 1;
-        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+        // комментарий: пустая строка, «#» или «;»
+        if line.trim().is_empty()
+            || line.trim_start().starts_with('#')
+            || line.trim_start().starts_with(';')
+        {
             continue;
         }
         let indent = line.len() - line.trim_start().len();
@@ -922,6 +926,11 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                                     "{color:#e5484d, size:18, bold, pad:8, width:120, align:center}"
                                         .into(),
                             }),
+                        }
+                        i += 1;
+                    } else if matches!(widget.kind, WidgetKind::List) && was_quoted {
+                        if widget.text.is_empty() {
+                            widget.text = token;
                         }
                         i += 1;
                     } else if matches!(widget.kind, WidgetKind::When) {
@@ -1508,5 +1517,18 @@ theme dark accent:#388bfd font:16 spacing:12 round:10
             errors.iter().any(|e| e.code == "ELSE_WITHOUT_WHEN"),
             "{errors:?}"
         );
+    }
+
+    #[test]
+    fn list_can_have_row_template_and_seed() {
+        let screen = parse(
+            "state items list \"молоко,хлеб\"\nlist -> items \"пусто\"\n  hbox\n    label \"• {item}\"\n",
+        )
+        .unwrap();
+        assert_eq!(screen.fields[0].value, "молоко,хлеб");
+        let node = &screen.root[0];
+        assert_eq!(node.kind, WidgetKind::List);
+        assert_eq!(node.text, "пусто");
+        assert_eq!(node.children.len(), 1);
     }
 }

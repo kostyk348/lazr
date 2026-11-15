@@ -267,6 +267,10 @@ impl<'a> Parser<'a> {
                         Ok(format!("{pad}state.{name}.push({code});\n"))
                     }
                     _ => {
+                        // remove без индекса — только для шаблона строки списка
+                        if matches!(self.peek(), Tok::Eof | Tok::Semi) {
+                            return Ok(format!("{pad}remove_row = Some(i);\n"));
+                        }
                         let index = self.expression()?;
                         if index.ty != Ty::Int {
                             return Err(ExprError::new(

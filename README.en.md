@@ -136,6 +136,7 @@ Model → live application. Every demo is machine-checked: `--problems` = 0, `ve
 | `paint.lisp` | Paint: 8 tools, palette, undo, contour fill, files and system dialogs |
 | `dashboard.lisp` | Dashboard: absolute `place` layout, anchors, theme, cards |
 | `todo.lisp` / `.lazr` | Tasks: a list of strings, `append`/`remove`/`clear`, text input, counters |
+| `checklist.lisp` / `.lazr` | Checklist: a row template with `{item}` and its own "remove" button, seeded items |
 | `gate.lisp` / `.lazr` | Access: string comparison and conditionally shown panels |
 | `thermostat.lisp` | Thermostat: numbers, thresholds and `when … else` |
 | `calc.lisp` | Budget: arithmetic in handlers (`*`, `/`), step slider |
@@ -148,10 +149,35 @@ Model → live application. Every demo is machine-checked: `--problems` = 0, `ve
   <img src="docs/thermostat.png" alt="Thermostat: thresholds and the else branch" width="360">
 </p>
 
-## Lists
+## Lists and row templates
 
-A `list` field is `Vec<String>`; `{items}` in text prints the count and the `list` widget draws rows with a
-delete button. Three operations in handlers:
+A `list` field is `Vec<String>`; `{items}` in text prints the count. Initial items are listed comma-separated
+right in the declaration: `state items list "bread,milk"`.
+
+A row can have a **template of its own**: ordinary widgets go inside `list`, `{item}` is the current row, and
+`remove items` (no index) deletes exactly that row.
+
+```lisp
+(state items list "bread,milk")
+(list :bind items :empty "empty"
+  (hbox
+    (label "• {item}" :size 15 :grow true)
+    (button "remove" (remove items) :size 12 :icon delete)))
+```
+
+```
+list -> items "empty"
+  hbox
+    label "• {item}" {size:15, grow}
+    button "remove" do remove items {size:12, icon:delete}
+```
+
+`remove items` outside a row template is a clear build error ("works only in a list row template"), not a
+runtime surprise.
+
+## List operations
+
+Three operations in handlers:
 
 ```lisp
 (state items list)

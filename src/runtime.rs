@@ -213,7 +213,19 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                         Value::Float(words.get(3).and_then(|v| v.parse().ok()).unwrap_or(0.0))
                     }
                     "bool" => Value::Bool(words.get(3).map(|v| v == "true").unwrap_or(false)),
-                    "list" => Value::List(Vec::new()),
+                    "list" => Value::List(
+                        words
+                            .get(3)
+                            .map(|v| {
+                                unquote(v)
+                                    .split(',')
+                                    .map(str::trim)
+                                    .filter(|item| !item.is_empty())
+                                    .map(str::to_string)
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                    ),
                     _ => Value::Text(words.get(3).map(|v| unquote(v)).unwrap_or_default()),
                 };
                 model.fields.push((name, value));
@@ -292,7 +304,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
         };
         let container = matches!(
             head.as_str(),
-            "vbox" | "hbox" | "grid" | "scroll" | "place" | "when"
+            "vbox" | "hbox" | "grid" | "scroll" | "place" | "when" | "list"
         );
         if head == "when" {
             // условие — всё до первого стиля
@@ -416,7 +428,8 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
             match rest.find('}') {
                 Some(close) => {
                     let name = &rest[..close];
-                    if !names.contains(&name.to_string()) {
+                    // item — переменная шаблона строки списка, а не поле состояния
+                    if name != "item" && !names.contains(&name.to_string()) {
                         problems.push(format!("в тексте подстановка «{{{name}}}» без поля"));
                     }
                     rest = &rest[close + 1..];
@@ -492,6 +505,7 @@ fn node_list<'a>(list: &'a mut Vec<Node>, path: &[usize]) -> &'a mut Vec<Node> {
 }
 
 fn text_with(state: &HashMap<String, Value>, text: &str) -> String {
+    // {item} уже лежит в state как строка текущей строки списка
     let mut out = String::new();
     let mut rest = text;
     while let Some(open) = rest.find('{') {
@@ -570,7 +584,16 @@ fn run_effect(state: &mut HashMap<String, Value>, effect: &str) {
             continue;
         }
         if let Some(rest) = statement.strip_prefix("remove ") {
-            let (name, index) = rest.split_once(' ').unwrap_or((rest, "0"));
+            let (name, index) = rest.split_once(' ').unwrap_or((rest, ""));
+            if index.trim().is_empty() {
+                // «remove items» без индекса — удалить текущую строку шаблона
+                let row = match state.get("__row") {
+                    Some(Value::Int(row)) => *row,
+                    _ => 0,
+                };
+                state.insert("__remove_row".to_string(), Value::Int(row));
+                continue;
+            }
             let index = eval_expr(state, index.trim()) as usize;
             if let Some(Value::List(items)) = state.get_mut(name.trim()) {
                 if index < items.len() {
@@ -888,7 +911,18 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
                     "bool" => Value::Bool(
                         args.get(2).and_then(Sexp::text).as_deref() == Some("true"),
                     ),
-                    "list" => Value::List(Vec::new()),
+                    "list" => Value::List(
+                        args.get(2)
+                            .and_then(Sexp::text)
+                            .map(|text| {
+                                text.split(',')
+                                    .map(str::trim)
+                                    .filter(|item| !item.is_empty())
+                                    .map(str::to_string)
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                    ),
                     _ => Value::Text(args.get(2).and_then(Sexp::text).unwrap_or_default()),
                 };
                 model.fields.push((name, value));
@@ -976,7 +1010,7 @@ fn build_node(
     };
     let container = matches!(
         head,
-        "vbox" | "hbox" | "grid" | "scroll" | "place" | "when" | "else"
+        "vbox" | "hbox" | "grid" | "scroll" | "place" | "when" | "else" | "list"
     );
     let mut index = 0;
     if head == "when" {
@@ -1042,7 +1076,10 @@ fn build_node(
                     index += 1;
                     continue;
                 }
-                if child_head == "set!" || child_head == "if" || child_head == "do" {
+                if matches!(
+                    child_head.as_str(),
+                    "set!" | "if" | "do" | "append" | "remove" | "clear"
+                ) {
                     node.handler = Some(Sexp::List(items.clone()));
                 } else {
                     match build_node(&child_head, &items[1..], counter, problems) {
@@ -1212,6 +1249,14 @@ fn eval_handler(state: &mut HashMap<String, Value>, form: &Sexp) {
                     }
                 }
                 _ => {
+                    if items.get(2).is_none() {
+                        let row = match state.get("__row") {
+                            Some(Value::Int(row)) => *row,
+                            _ => 0,
+                        };
+                        state.insert("__remove_row".to_string(), Value::Int(row));
+                        return;
+                    }
                     let index = items.get(2).map(|v| eval_expr_sexp(state, v)).unwrap_or(0.0) as usize;
                     if let Some(Value::List(list)) = state.get_mut(&name) {
                         if index < list.len() {
@@ -1370,6 +1415,10 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
                 if TRACE.load(Ordering::Relaxed) {
                     let mut changes: Vec<String> = Vec::new();
                     for (name, value) in state.iter() {
+                        // служебные ключи шаблона строки не показываем
+                        if name.starts_with("__") || name == "item" {
+                            continue;
+                        }
                         if before.get(name) != Some(value) {
                             changes.push(format!(
                                 "{name}: {} → {}",
@@ -1513,6 +1562,40 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
                 Some(Value::List(items)) => items.clone(),
                 _ => Vec::new(),
             };
+            if !rows.is_empty() && !node.children.is_empty() {
+                // шаблон строки: {item} — текущая строка, «remove items» — эта строка
+                let mut remove_row: Option<usize> = None;
+                for (index, item) in rows.iter().enumerate() {
+                    state.insert("item".to_string(), Value::Text(item.clone()));
+                    state.insert("__row".to_string(), Value::Int(index as i64));
+                    ui.horizontal(|ui| {
+                        for child in &node.children {
+                            draw_node(ui, child, state);
+                        }
+                    });
+                    if let Some(Value::Int(_)) = state.get("__row") {
+                        // кнопка могла попросить удалить строку
+                        if let Some(request) = state.get("__remove_row").cloned() {
+                            if let Value::Int(row) = request {
+                                if row as usize == index {
+                                    remove_row = Some(index);
+                                }
+                            }
+                        }
+                    }
+                }
+                state.remove("item");
+                state.remove("__row");
+                state.remove("__remove_row");
+                if let Some(row) = remove_row {
+                    if let Some(Value::List(items)) = state.get_mut(&field) {
+                        if row < items.len() {
+                            items.remove(row);
+                        }
+                    }
+                }
+                return;
+            }
             if rows.is_empty() {
                 let hint = if node.text.is_empty() {
                     "пусто"
