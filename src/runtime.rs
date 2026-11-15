@@ -1044,6 +1044,10 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
                 };
                 model.fields.push((name, value));
             }
+            "font-family" | "font_family" | "ui-font" => {
+                model.ui_font = args.first().and_then(Sexp::text);
+                continue;
+            }
             "icon-font" | "icon_font" => {
                 if let Some(path) = args.first().and_then(Sexp::text) {
                     model.icon_font = Some(path);
@@ -2170,3 +2174,27 @@ fn main() {
     );
 }
 "####;
+
+#[cfg(test)]
+mod tests {
+    use super::RUNTIME_SRC;
+
+    /// Рантайм живёт строкой RUNTIME_SRC, поэтому «знает ли он форму» проверяем
+    /// по самой строке: неизвестная форма превращается в «форма … неизвестна»
+    /// и валит `lazr live --problems` на живой демке.
+    #[test]
+    fn runtime_source_knows_font_family_mono_and_hint() {
+        assert!(
+            RUNTIME_SRC.contains(r#""font-family" | "font_family" | "ui-font" =>"#),
+            "рантайм не разбирает font-family"
+        );
+        assert!(
+            RUNTIME_SRC.contains(r#""mono" | "моно" => node.mono = true"#),
+            "рантайм не понимает моноРежим"
+        );
+        assert!(
+            RUNTIME_SRC.contains(r#""hint" | "подсказка" => node.hint"#),
+            "рантайм не понимает подсказки"
+        );
+    }
+}
