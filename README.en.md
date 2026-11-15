@@ -23,6 +23,12 @@
 </p>
 
 <p align="center">
+  <img src="docs/capsule.png" alt="Planner: chips, soft shadow, own window frame" width="330">
+  <img src="docs/video.png" alt="Cinema: real video through ffplay" width="330">
+  <img src="docs/winamp.png" alt="Winamp: real playback through mpv over a unix socket" width="330">
+</p>
+
+<p align="center">
   <img src="docs/player.png" alt="Player — an app described entirely by a model" width="330">
   <img src="docs/clock.png" alt="Clock — the dial is drawn by the model's Rust code" width="330">
   <img src="docs/terminal.png" alt="Terminal on a monospaced font" width="330">
@@ -170,6 +176,10 @@ Measured on this machine with a warm shared build cache.
 | `settings.lisp` | Settings: light theme, checkbox, slider, text input, `do` with two assignments |
 | `quiz.lisp` | Quiz: two counters, several actions in one button |
 | `live-demo.lisp` / `.lazr` | Runtime showcase: edit the file, the window follows |
+| `clock.lisp` | Clock: the dial is drawn entirely by the model's Rust code |
+| `capsule.lisp` | Planner in CapsuleCraft style: `{pill}` chips, soft layered shadow, own window frame |
+| `video.lisp` | Cinema: real video — `ffplay` spawned from the demo, own file via zenity |
+| `winamp.lisp` | Winamp: a real player — `mpv` over a unix socket (position, pause, seek, volume), visualizer, playlist |
 
 <p align="center">
   <img src="docs/gate.png" alt="Access: a panel gated by a condition" width="360">

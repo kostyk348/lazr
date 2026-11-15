@@ -18,7 +18,7 @@
   <a href="https://kostyk348.github.io/lazr/"><img src="https://img.shields.io/badge/страница-lazr-ffb86b" alt="страница"></a>
   <img src="https://img.shields.io/badge/тесты-87%20зелёных-39d353" alt="87 тестов">
   <img src="https://img.shields.io/badge/зависимости-0%20в%20инструменте-388bfd" alt="0 зависимостей">
-  <img src="https://img.shields.io/badge/демки-20%20моделей-ffb86b" alt="20 демок">
+  <img src="https://img.shields.io/badge/демки-21%20модель-ffb86b" alt="21 демка">
   <img src="https://img.shields.io/badge/license-MIT-8b949e" alt="MIT">
 </p>
 
@@ -171,6 +171,10 @@ else
 | `settings.lisp` | Настройки: светлая тема, чекбокс, слайдер, поле ввода, `do` из двух присваиваний |
 | `quiz.lisp` | Викторина: два счётчика, несколько действий в одной кнопке |
 | `live-demo.lisp` / `.lazr` | Витрина рантайма: правишь файл — окно меняется без пересборки |
+| `clock.lisp` | Часы: циферблат целиком нарисован Rust-кодом модели (риски, три стрелки, цифровое время) |
+| `capsule.lisp` | Планировщик в стиле CapsuleCraft: пилюли `{pill}`, мягкая тень слоями, своя рамка, фильтр задач |
+| `video.lisp` | Кинотеатр: настоящее видео — `ffplay` из демки, свой файл через zenity, история просмотров |
+| `winamp.lisp` | Winamp: настоящий плеер — `mpv` по unix-сокету (позиция, пауза, seek, громкость), визуализатор, плейлист |
 
 <p align="center">
   <img src="docs/gate.png" alt="Доступ: панель по условию" width="360">
@@ -179,8 +183,16 @@ else
 <p align="center">
   <img src="docs/checklist.png" alt="Чек-лист: шаблон строки списка" width="420">
 </p>
+<p align="center">
+  <img src="docs/capsule.png" alt="Планировщик: пилюли, мягкая тень, своя рамка окна" width="330">
+  <img src="docs/video.png" alt="Кинотеатр: настоящее видео через ffplay" width="330">
+  <img src="docs/winamp.png" alt="Winamp: настоящий плей на mpv по unix-сокету" width="330">
+</p>
+<p align="center">
+  <sub>Планировщик, Кинотеатр и Winamp — видеоплей, видеоплеер и плеер запускают настоящие внешние программы
+  по IPC, а интерфейс, визуализатор и логика остаются моделью.</sub>
+</p>
 
-История версий — в [CHANGELOG.md](CHANGELOG.md).
 
 История версий — в [CHANGELOG.md](CHANGELOG.md).
 

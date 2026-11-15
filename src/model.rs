@@ -629,6 +629,9 @@ fn tokens(line: &str) -> Vec<(String, bool)> {
             continue;
         }
         match ch {
+            // Внутри блока rust кавычки — часть кода (экранированные и нет):
+            // строковый режим тут ломал бы `format!("{...}")`.
+            '"' if depth > 0 => current.push(ch),
             '"' => quoted = true,
             '{' => {
                 if depth == 0 && !current.is_empty() {
