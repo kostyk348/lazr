@@ -141,6 +141,9 @@ impl Project {
     /// Установщика нет и не будет, пока не появится подпись: это честная
     /// граница — .desktop + иконка + tarball, а не инсталлятор.
     pub fn package(&self, release: bool) -> Result<Vec<String>, String> {
+        // Поставка без предварительного build — обычный путь: сначала генерируем,
+        // иначе cargo падает на несуществующем рабочем каталоге.
+        self.generate()?;
         let profile = if release { "release" } else { "debug" };
         let mut args = vec!["build".to_string()];
         if release {
@@ -188,13 +191,33 @@ impl Project {
         }
 
         let desktop = format!(
-            "[Desktop Entry]\nType=Application\nName={title}\nComment=Собрано lazr из модели экрана\nExec={bin}\nIcon={icon}\nTerminal=false\nCategories=Utility;\n",
+            "[Desktop Entry]\nType=Application\nVersion=1.0\nName={title}\nComment={comment}\nExec={bin}\nIcon={icon}\nTerminal=false\nCategories=Utility;\nX-Lazr-Model=form.lazr\n",
             title = self.screen.title,
+            comment = format!(
+                "Собрано lazr {} из модели экрана",
+                env!("CARGO_PKG_VERSION")
+            ),
             bin = bin,
             icon = icon_line,
         );
         std::fs::write(dist.join(format!("{bin}.desktop")), desktop)
             .map_err(|err| format!("desktop: {err}"))?;
+
+        // Модель — часть поставки: из неё приложение воспроизводимо.
+        std::fs::copy(self.dir.join(FORM), dist.join("form.lazr"))
+            .map_err(|err| format!("form.lazr в dist: {err}"))?;
+        // Лицензия проекта и версия — людям, которые поставят пакет.
+        let mut bundled = Vec::new();
+        if let Ok(license) = std::fs::read_to_string("LICENSE") {
+            std::fs::write(dist.join("LICENSE"), license).map_err(|err| format!("LICENSE: {err}"))?;
+            bundled.push("LICENSE");
+        }
+        std::fs::write(
+            dist.join("VERSION"),
+            format!("{}\nlazr {}\n", bin, env!("CARGO_PKG_VERSION")),
+        )
+        .map_err(|err| format!("VERSION: {err}"))?;
+        bundled.push("VERSION");
 
         let archive = dist.join(format!("{bin}-{profile}.tar.gz"));
         let status = Command::new("tar")
@@ -205,6 +228,8 @@ impl Project {
             .arg(&bin)
             .arg(format!("{bin}.desktop"))
             .arg(&icon_line)
+            .arg("form.lazr")
+            .args(&bundled)
             .status();
         if !matches!(status, Ok(status) if status.success()) {
             return Err("tar не смог собрать архив".to_string());
