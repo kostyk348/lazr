@@ -109,7 +109,7 @@ fn ensure_demo_track() -> String {
     path.to_string()
 }
 
-fn mpv_play(path: &str) {
+fn mpv_play(path: &str) -> bool {
     mpv_quit();
     let _ = std::fs::remove_file(SOCK);
     let spawned = std::process::Command::new("mpv")
@@ -122,11 +122,15 @@ fn mpv_play(path: &str) {
         .stdout(std::process::Stdio::null())
         .stderr(std::fs::OpenOptions::new().create(true).append(true).open("/tmp/lazr-mpv.err").unwrap())
         .spawn();
+    let started = spawned.is_ok();
     if let Ok(mut slot) = MPV_CHILD.lock() {
         *slot = spawned.ok();
     }
-    // сокет появляется за десятки миллисекунд
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    if started {
+        // сокет появляется за десятки миллисекунд
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+    started
 }
 
 // --- оформление: экран-визуализатор (анимация, не спектр) -------------------
@@ -256,9 +260,14 @@ for (index, (glyph, name)) in keys.iter().enumerate() {
                 state.playing = true;
             } else {
                 let demo = ensure_demo_track();
-                state.current = "демо-луп (свой WAV)".to_string();
-                state.playing = true;
-                mpv_play(&demo);
+                // без mpv звука не будет — говорим об этом в самом окне, а не молчим
+                if mpv_play(&demo) {
+                    state.current = "демо-луп (свой WAV)".to_string();
+                    state.playing = true;
+                } else {
+                    state.current = "mpv не найден — поставьте его, звук отдаётся внешнему плееру".to_string();
+                    state.playing = false;
+                }
             }
         }
         "пауза" => {
