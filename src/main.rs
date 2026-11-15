@@ -568,6 +568,39 @@ fn cmd_live(args: &[String]) -> i32 {
     };
     let mut command = std::process::Command::new(&binary);
     command.arg(&model_path);
+    // Таблица стилей живёт рядом с моделью: передаём её текст живому режиму,
+    // тот применит тему и параметры окна. Стили виджетов из CSS в живом режиме
+    // не применяются — это названо в README.
+    if let Ok(model_text) = std::fs::read_to_string(&model_path) {
+        let sheet_path = model_text.lines().find_map(|line| {
+            let line = line.trim();
+            line.strip_prefix("style-sheet")
+                .or_else(|| line.strip_prefix("style_sheet"))
+                .or_else(|| line.strip_prefix("стили"))
+                .map(|rest| rest.trim().trim_matches('"').to_string())
+        });
+        if let Some(sheet) = sheet_path {
+            let base = std::path::Path::new(&model_path)
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_default();
+            if let Ok(css) = std::fs::read_to_string(base.join(&sheet)) {
+                // CSS применяем настоящим движком (css.rs) и отдаём живому режиму
+                // уже готовые строки темы и окна — без css-движка внутри него.
+                if let Ok(screen) = crate::model::parse_with_sheet(&model_text, Some(&css)) {
+                    let rendered = crate::model::render(&screen);
+                    for line in rendered.lines() {
+                        if line.starts_with("theme ") {
+                            command.env("LAZR_THEME", line);
+                        }
+                        if line.starts_with("window ") {
+                            command.env("LAZR_WINDOW", line);
+                        }
+                    }
+                }
+            }
+        }
+    }
     if opts.has("headless") {
         command.arg("--headless");
     }

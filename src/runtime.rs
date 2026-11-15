@@ -155,6 +155,8 @@ struct Model {
     ui_font: Option<String>,
     /// Файл состояния между запусками.
     store: Option<String>,
+    /// Таблица стилей: в живом режиме применяется тема из неё.
+    style_sheet: Option<String>,
     theme: Theme,
     title: String,
     width: u32,
@@ -211,6 +213,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
         icon_font: None,
         ui_font: None,
         store: None,
+        style_sheet: None,
         theme: Theme::default(),
         title: "Окно".into(),
         width: 520,
@@ -325,6 +328,10 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                     _ => Value::Text(words.get(3).map(|v| unquote(v)).unwrap_or_default()),
                 };
                 model.fields.push((name, value));
+                continue;
+            }
+            "style-sheet" | "style_sheet" | "стили" => {
+                model.style_sheet = words.get(1).map(|path| unquote(path));
                 continue;
             }
             "store" | "хранилище" | "state-file" => {
@@ -987,6 +994,7 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
         icon_font: None,
         ui_font: None,
         store: None,
+        style_sheet: None,
         theme: Theme::default(),
         title: "Окно".into(),
         width: 520,
@@ -1051,6 +1059,10 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
                     _ => Value::Text(args.get(2).and_then(Sexp::text).unwrap_or_default()),
                 };
                 model.fields.push((name, value));
+            }
+            "style-sheet" | "style_sheet" | "стили" => {
+                model.style_sheet = args.first().and_then(Sexp::text);
+                continue;
             }
             "store" | "хранилище" | "state-file" => {
                 model.store = args.first().and_then(Sexp::text);
@@ -2160,6 +2172,27 @@ fn main() {
     if let Some(store) = app.model.store.clone() {
         store_load(&store, &mut app.state);
     }
+    // Тема и окно из таблицы стилей: внешний lazr уже применил CSS и передал
+    // готовые строки. Стили виджетов из CSS в живом режиме не применяются —
+    // это названо в README.
+    let theme_line = std::env::var("LAZR_THEME").ok();
+    let window_line = std::env::var("LAZR_WINDOW").ok();
+    if theme_line.is_some() || window_line.is_some() {
+        let mut text = String::new();
+        if let Some(line) = theme_line {
+            text.push_str(&line);
+            text.push('\n');
+        }
+        if let Some(line) = window_line {
+            text.push_str(&line);
+            text.push('\n');
+        }
+        let (overlay, problems) = parse_model(&text);
+        if problems.is_empty() {
+            app.model.theme = overlay.theme;
+            app.model.window = overlay.window;
+        }
+    }
     if std::env::args().any(|arg| arg == "--trace") {
         TRACE.store(true, Ordering::Relaxed);
     }
@@ -2283,6 +2316,10 @@ mod tests {
         assert!(
             RUNTIME_SRC.contains(r#""hint" | "подсказка" => node.hint"#),
             "рантайм не понимает подсказки"
+        );
+        assert!(
+            RUNTIME_SRC.contains(r#""style-sheet" | "style_sheet" | "стили" =>"#),
+            "рантайм не разбирает style-sheet"
         );
     }
 }
