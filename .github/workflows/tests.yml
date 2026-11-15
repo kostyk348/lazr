@@ -85,6 +85,16 @@ jobs:
           cargo run -q -- headless /tmp/when-gen | tee /tmp/when-gen/out.txt
           # фон окна рисует сама программа, поэтому фигур на одну больше
           grep -q '2 фигур' /tmp/when-gen/out.txt
+      - name: своя рамка окна (генератор)
+        run: |
+          mkdir -p /tmp/frame-ci
+          printf 'window "Р" 420 300 chrome:own topmost:yes min:360x240\nstate n int 0\nlabel "тело"\n' > /tmp/frame-ci/form.lazr
+          cargo run -q -- build /tmp/frame-ci
+          grep -q 'with_decorations(false)' /tmp/frame-ci/app/src/main.rs
+          grep -q 'fn titlebar(ui: &mut egui::Ui' /tmp/frame-ci/app/src/main.rs
+          grep -q 'with_window_level(egui::WindowLevel::AlwaysOnTop)' /tmp/frame-ci/app/src/main.rs
+          cargo run -q -- headless /tmp/frame-ci
+          cargo run -q -- live /tmp/frame-ci/form.lazr --problems | grep -q 'problems: 0'
       - name: внешние иконки и карточки (кодогенерация)
         run: |
           mkdir -p /tmp/icons-ci

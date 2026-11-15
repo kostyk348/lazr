@@ -260,6 +260,7 @@ pub fn eval(forms: &[Value]) -> Result<Evaluated, LispError> {
             rust_fields: Vec::new(),
             theme: Default::default(),
             icon_font: None,
+            window: crate::model::WindowOptions::default(),
             root: vec![Widget::container(WidgetKind::Vbox)],
         },
         env: HashMap::new(),
@@ -307,6 +308,31 @@ impl Builder {
                 }
                 if let Some(height) = args.get(2).and_then(Value::num) {
                     self.screen.height = height as u32;
+                }
+                // Параметры окна: (window "Плеер" 480 520 :chrome own :topmost true)
+                let mut i = 3;
+                while i < args.len() {
+                    let key = match &args[i] {
+                        Value::Sym(token) => token.trim_start_matches(':').to_string(),
+                        other => {
+                            return Err(LispError::new(
+                                format!("параметр окна ожидался словом, а не {other:?}"),
+                                "(window \"Плеер\" 480 520 :chrome own)",
+                            ))
+                        }
+                    };
+                    let value = args.get(i + 1).cloned().unwrap_or(Value::Bool(true));
+                    let text = match &value {
+                        Value::Bool(flag) => flag.to_string(),
+                        other => other.text().unwrap_or_default(),
+                    };
+                    self.screen.window.set(&key, &text).map_err(|message| {
+                        LispError::new(
+                            message,
+                            ":chrome :resizable :topmost :center :transparent :drag-anywhere :min :max",
+                        )
+                    })?;
+                    i += 2;
                 }
                 Ok(None)
             }

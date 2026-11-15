@@ -1,6 +1,6 @@
 ; Плеер — компактный, как Winamp: экран-визуализатор, транспорт, громкость, очередь.
 (icon-font "/usr/share/fonts/TTF/fa-solid-900.ttf")
-(window "Плеер" 480 520)
+(window "Плеер" 480 520 :chrome own :topmost true :drag-anywhere true :min "420x460")
 (theme light accent:#0084c7 panel:#e6f2f9 card:#ffffff muted:#2f4c5c font:14 spacing:8 round:12)
 (state playing bool true)
 (state track int 1)

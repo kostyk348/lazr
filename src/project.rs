@@ -47,6 +47,7 @@ impl Project {
             rust_fields: Vec::new(),
             theme: Default::default(),
             icon_font: None,
+            window: Default::default(),
             root: vec![Widget::container(WidgetKind::Vbox)],
         };
         let project = Project { dir, screen };

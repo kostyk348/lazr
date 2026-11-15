@@ -403,6 +403,91 @@ impl Theme {
     }
 }
 
+/// Рамка окна: системная (как у всех) или своя — тогда приложение рисует
+/// заголовок само и умеет перетаскиваться и закрываться.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Chrome {
+    System,
+    Own,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowOptions {
+    pub chrome: Chrome,
+    pub resizable: bool,
+    pub topmost: bool,
+    pub center: bool,
+    pub transparent: bool,
+    pub drag_anywhere: bool,
+    pub min: Option<(u32, u32)>,
+    pub max: Option<(u32, u32)>,
+}
+
+impl Default for WindowOptions {
+    fn default() -> Self {
+        Self {
+            chrome: Chrome::System,
+            resizable: true,
+            topmost: false,
+            center: false,
+            transparent: false,
+            drag_anywhere: false,
+            min: None,
+            max: None,
+        }
+    }
+}
+
+impl WindowOptions {
+    /// Один параметр окна: ключ и значение. Одна и та же запись годится и для
+    /// строки `window … topmost:yes`, и для отдельной строки `topmost yes`.
+    pub fn set(&mut self, key: &str, value: &str) -> Result<(), String> {
+        let flag = matches!(value.trim(), "yes" | "true" | "да" | "on" | "1");
+        match key.trim() {
+            "chrome" | "рамка" => {
+                self.chrome = match value.trim() {
+                    "own" | "своя" => Chrome::Own,
+                    "system" | "системная" => Chrome::System,
+                    other => {
+                        return Err(format!(
+                            "рамка «{other}» неизвестна: system или own"
+                        ))
+                    }
+                }
+            }
+            "resizable" | "размер" => self.resizable = flag,
+            "topmost" | "сверху" => self.topmost = flag,
+            "center" | "центр" => self.center = flag,
+            "transparent" | "прозрачное" => self.transparent = flag,
+            "drag-anywhere" | "тянуть" => self.drag_anywhere = flag,
+            "min" | "минимум" => self.min = Some(parse_size(value)?),
+            "max" | "максимум" => self.max = Some(parse_size(value)?),
+            other => {
+                return Err(format!(
+                    "параметр окна «{other}» неизвестен: chrome, resizable, topmost, center, transparent, drag-anywhere, min, max"
+                ))
+            }
+        }
+        Ok(())
+    }
+}
+
+fn parse_size(value: &str) -> Result<(u32, u32), String> {
+    let cleaned = value.trim().trim_matches('"');
+    let (w, h) = cleaned
+        .split_once('x')
+        .ok_or_else(|| format!("размер «{cleaned}» — нужен вид 400x300"))?;
+    let w: u32 = w
+        .trim()
+        .parse()
+        .map_err(|_| format!("ширина «{w}» — не число"))?;
+    let h: u32 = h
+        .trim()
+        .parse()
+        .map_err(|_| format!("высота «{h}» — не число"))?;
+    Ok((w, h))
+}
+
 #[derive(Debug, Clone)]
 pub struct Screen {
     pub title: String,
@@ -414,6 +499,8 @@ pub struct Screen {
     pub theme: Theme,
     /// Внешний TTF-шрифт с иконками (Font Awesome, Material Symbols, …).
     pub icon_font: Option<String>,
+    /// Рамка, всегда сверху, минимум/максимум размера, перетаскивание.
+    pub window: WindowOptions,
     pub root: Vec<Widget>,
 }
 
@@ -655,6 +742,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         rust_fields: Vec::new(),
         theme: Theme::default(),
         icon_font: None,
+        window: WindowOptions::default(),
         root: Vec::new(),
     };
     let lines: Vec<&str> = text.lines().collect();
@@ -804,10 +892,41 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     continue;
                 }
                 screen.title = words[1].clone();
+                let mut rest = 2;
                 if let Some(size) = words.get(2) {
                     if let Some((w, h)) = size.split_once('x') {
                         screen.width = w.parse().unwrap_or(screen.width);
                         screen.height = h.parse().unwrap_or(screen.height);
+                        rest = 3;
+                    } else if let (Ok(w), Some(Ok(h))) = (
+                        size.parse::<u32>(),
+                        words.get(3).map(|token| token.parse::<u32>()),
+                    ) {
+                        // Размер можно писать и двумя числами: window "Т" 420 300
+                        screen.width = w;
+                        screen.height = h;
+                        rest = 4;
+                    }
+                }
+                // Параметры окна прямо в строке: window "Плеер" 480 520 chrome:own topmost:yes
+                for token in words.iter().skip(rest) {
+                    match token.split_once(':') {
+                        Some((key, value)) => {
+                            if let Err(message) = screen.window.set(key, value) {
+                                errors.push(ModelError {
+                                    line: line_no,
+                                    code: "BAD_WINDOW_OPTION",
+                                    message,
+                                    hint: "chrome:own resizable:no topmost:yes min:400x300".into(),
+                                });
+                            }
+                        }
+                        None => errors.push(ModelError {
+                            line: line_no,
+                            code: "BAD_WINDOW_OPTION",
+                            message: format!("«{token}» — не параметр окна"),
+                            hint: "параметры пишутся как chrome:own".into(),
+                        }),
                     }
                 }
             }
@@ -837,6 +956,46 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     }
                 }
                 screen.theme = theme;
+            }
+            "chrome"
+            | "рамка"
+            | "resizable"
+            | "размер"
+            | "topmost"
+            | "сверху"
+            | "center"
+            | "центр"
+            | "transparent"
+            | "прозрачное"
+            | "drag-anywhere"
+            | "тянуть"
+            | "min"
+            | "минимум"
+            | "max"
+            | "максимум"
+            | "window-min"
+            | "window-max" => {
+                let value = match words.get(1) {
+                    Some(value) => value.clone(),
+                    None => match head.as_str() {
+                        // «chrome», «resizable» и прочие флаги без значения — это «да»
+                        _ if words.len() == 1 => "yes".to_string(),
+                        _ => String::new(),
+                    },
+                };
+                let key = match head.as_str() {
+                    "window-min" => "min",
+                    "window-max" => "max",
+                    other => other,
+                };
+                if let Err(message) = screen.window.set(key, &value) {
+                    errors.push(ModelError {
+                        line: line_no,
+                        code: "BAD_WINDOW_OPTION",
+                        message,
+                        hint: "chrome own / topmost yes / min 400x300".into(),
+                    });
+                }
             }
             "icon-font" | "icon_font" => {
                 match words.get(1) {
@@ -1273,12 +1432,40 @@ fn child_list<'a>(root: &'a mut Vec<Widget>, path: &[usize]) -> &'a mut Vec<Widg
 
 pub fn render(screen: &Screen) -> String {
     let mut out = String::new();
-    out.push_str(&format!(
-        "window {} {}x{}\n",
+    // Параметры окна пишем только те, что отличаются от обычного окна.
+    let mut window = format!(
+        "window {} {}x{}",
         quote(&screen.title),
         screen.width,
         screen.height
-    ));
+    );
+    let options = &screen.window;
+    if options.chrome == Chrome::Own {
+        window.push_str(" chrome:own");
+    }
+    if !options.resizable {
+        window.push_str(" resizable:no");
+    }
+    if options.topmost {
+        window.push_str(" topmost:yes");
+    }
+    if options.center {
+        window.push_str(" center:yes");
+    }
+    if options.transparent {
+        window.push_str(" transparent:yes");
+    }
+    if options.drag_anywhere {
+        window.push_str(" drag-anywhere:yes");
+    }
+    if let Some((w, h)) = options.min {
+        window.push_str(&format!(" min:{w}x{h}"));
+    }
+    if let Some((w, h)) = options.max {
+        window.push_str(&format!(" max:{w}x{h}"));
+    }
+    out.push_str(&window);
+    out.push('\n');
     for field in &screen.fields {
         out.push_str(&format!(
             "state {} {} {}\n",
@@ -1449,6 +1636,69 @@ vbox {pad:12}
   hbox {align:center}
     text_input "Имя" -> name {grow}
 "#;
+
+    #[test]
+    fn window_options_in_line() {
+        let screen = parse(
+            r#"window "Т" 420 300 chrome:own topmost:yes min:360x240
+state n int 0
+label "x""#,
+        )
+        .expect("окно с параметрами");
+        assert_eq!(screen.width, 420);
+        assert_eq!(screen.height, 300);
+        assert_eq!(screen.window.chrome, Chrome::Own);
+        assert!(screen.window.topmost);
+        assert_eq!(screen.window.min, Some((360, 240)));
+        assert!(screen.window.resizable);
+    }
+
+    #[test]
+    fn window_options_as_lines() {
+        let screen = parse(
+            r#"window "Т" 400x300
+chrome own
+resizable no
+drag-anywhere yes
+max 900x700
+label "x""#,
+        )
+        .expect("окно с директивами");
+        assert_eq!(screen.window.chrome, Chrome::Own);
+        assert!(!screen.window.resizable);
+        assert!(screen.window.drag_anywhere);
+        assert_eq!(screen.window.max, Some((900, 700)));
+    }
+
+    #[test]
+    fn window_option_typo_is_an_error() {
+        let errors = parse(
+            r#"window "Т" 400x300 chrome:floating
+label "x""#,
+        )
+        .expect_err("опечатка в параметре окна");
+        assert_eq!(errors[0].code, "BAD_WINDOW_OPTION");
+        assert!(
+            errors[0].message.contains("floating"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn window_options_survive_render() {
+        let screen = parse(
+            r#"window "Т" 420 300 chrome:own topmost:yes min:360x240 drag-anywhere:yes
+label "x""#,
+        )
+        .expect("окно");
+        let text = render(&screen);
+        assert!(text.contains("chrome:own"), "{text}");
+        assert!(text.contains("topmost:yes"), "{text}");
+        assert!(text.contains("min:360x240"), "{text}");
+        let again = parse(&text).expect("после render");
+        assert_eq!(again.window, screen.window);
+    }
 
     #[test]
     fn place_keeps_absolute_points_and_anchors() {

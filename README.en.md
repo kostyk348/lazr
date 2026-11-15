@@ -187,6 +187,29 @@ lines), `font`, `spacing`, `round`. A style is data: one line in the model, zero
 What styles cannot do: lazr has no gradients, blur, shadows or textures — a style rests on palette, shape and
 rhythm, not on effects. The skill states that limitation honestly.
 
+## Window: own frame and behaviour
+
+The window is configured by the same keys in two spellings — inline on the `window` line, or as separate lines:
+
+```
+window "Player" 480 520 chrome:own topmost:yes drag-anywhere:yes min:420x460
+```
+
+| Key | Effect |
+|---|---|
+| `chrome:own` | no system frame: lazr draws the title strip itself — drag it, the cross closes the window |
+| `resizable:no` | size is fixed |
+| `topmost:yes` | window stays above others |
+| `drag-anywhere:yes` | drag by any point of the body, not just the title |
+| `transparent:yes` | transparent window background (whatever the model paints shows through) |
+| `min:400x300`, `max:1400x1000` | size limits |
+
+Verified by hand: a `chrome:own` window has no system title bar, the app draws both title and cross, and a
+click on the cross terminates the process. `lazr live` does the same — the live frame matches the built app.
+
+`center` does not move the window yet: position belongs to the window manager, and the model does not know the
+monitor size. That is stated, not hidden.
+
 ## Icons from an external font, and cards
 
 Icons are not drawn into the repository: the model points at **any TTF** (Font Awesome, Material Symbols,

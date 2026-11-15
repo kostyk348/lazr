@@ -97,6 +97,51 @@ impl Default for Theme {
     }
 }
 
+/// Опции окна в рантайме: те же ключи, что в модели.
+#[derive(Clone, PartialEq)]
+struct WindowFlags {
+    own: bool,
+    resizable: bool,
+    topmost: bool,
+    transparent: bool,
+    drag_anywhere: bool,
+    min: Option<(u32, u32)>,
+    max: Option<(u32, u32)>,
+}
+
+impl WindowFlags {
+    fn new() -> Self {
+        Self {
+            own: false,
+            resizable: true,
+            topmost: false,
+            transparent: false,
+            drag_anywhere: false,
+            min: None,
+            max: None,
+        }
+    }
+
+    fn set(&mut self, key: &str, value: &str) {
+        let flag = matches!(value.trim(), "yes" | "true" | "да" | "on" | "1");
+        let size = |text: &str| -> Option<(u32, u32)> {
+            let (w, h) = text.trim().trim_matches('"').split_once('x')?;
+            Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+        };
+        match key {
+            "chrome" => self.own = matches!(value.trim(), "own" | "своя"),
+            "resizable" => self.resizable = flag,
+            "topmost" => self.topmost = flag,
+            "center" => {}
+            "transparent" => self.transparent = flag,
+            "drag-anywhere" => self.drag_anywhere = flag,
+            "min" | "window-min" => self.min = size(value),
+            "max" | "window-max" => self.max = size(value),
+            _ => {}
+        }
+    }
+}
+
 struct Model {
     /// Подключённый TTF с иконками.
     icon_font: Option<String>,
@@ -104,6 +149,7 @@ struct Model {
     title: String,
     width: u32,
     height: u32,
+    window: WindowFlags,
     fields: Vec<(String, Value)>,
     root: Vec<Node>,
 }
@@ -155,6 +201,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
         title: "Окно".into(),
         width: 520,
         height: 380,
+        window: WindowFlags::new(),
         fields: Vec::new(),
         root: Vec::new(),
     };
@@ -203,12 +250,38 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                 if let Some(title) = words.get(1) {
                     model.title = unquote(title);
                 }
+                let mut rest = 2;
                 if let Some(size) = words.get(2) {
                     if let Some((w, h)) = size.split_once('x') {
                         model.width = w.parse().unwrap_or(model.width);
                         model.height = h.parse().unwrap_or(model.height);
+                        rest = 3;
+                    } else if let (Ok(w), Some(Ok(h))) = (
+                        size.parse::<u32>(),
+                        words.get(3).map(|token| token.parse::<u32>()),
+                    ) {
+                        model.width = w;
+                        model.height = h;
+                        rest = 4;
                     }
                 }
+                for token in words.iter().skip(rest) {
+                    if let Some((key, value)) = token.split_once(':') {
+                        model.window.set(key, value);
+                    }
+                }
+                continue;
+            }
+            // отдельные строки-параметры окна: chrome own / topmost yes / min 400x300
+            "chrome" | "resizable" | "topmost" | "center" | "transparent" | "drag-anywhere"
+            | "min" | "max" | "window-min" | "window-max" => {
+                let value = words.get(1).cloned().unwrap_or_else(|| "yes".to_string());
+                let key = match head.as_str() {
+                    "window-min" => "min",
+                    "window-max" => "max",
+                    other => other,
+                };
+                model.window.set(key, &value);
                 continue;
             }
             "state" => {
@@ -894,6 +967,7 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
         title: "Окно".into(),
         width: 520,
         height: 380,
+        window: WindowFlags::new(),
         fields: Vec::new(),
         root: Vec::new(),
     };
@@ -919,6 +993,14 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
                 }
                 if let Some(height) = args.get(2).and_then(Sexp::num) {
                     model.height = height as u32;
+                }
+                let mut i = 3;
+                while i + 1 < args.len() {
+                    let key = args[i].text().unwrap_or_default();
+                    let key = key.trim_start_matches(':').to_string();
+                    let value = args[i + 1].text().unwrap_or_default();
+                    model.window.set(&key, &value);
+                    i += 2;
                 }
             }
             "state" => {
@@ -1787,6 +1869,59 @@ impl LiveApp {
     }
 }
 
+/// Своя рамка окна для живого режима: тот же заголовок, что в собранном
+/// приложении — тянуть за полосу, закрыть крестиком.
+fn titlebar(ui: &mut egui::Ui, title: &str) {
+    let height = 30.0;
+    let rect = egui::Rect::from_min_size(ui.max_rect().min, egui::vec2(ui.available_width(), height));
+    let drag = ui.interact(rect, egui::Id::new("lazr:titlebar"), egui::Sense::click_and_drag());
+    if drag.drag_started() {
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+    let close = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - 16.0, rect.center().y),
+        egui::vec2(24.0, 24.0),
+    );
+    let painter = ui.painter().clone();
+    let fill = if drag.hovered() {
+        ui.visuals().widgets.hovered.bg_fill
+    } else {
+        ui.visuals().widgets.inactive.bg_fill
+    };
+    painter.rect_filled(rect, egui::CornerRadius::ZERO, fill);
+    let ink = ui.visuals().strong_text_color();
+    painter.text(
+        egui::pos2(rect.left() + 10.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title,
+        egui::FontId::proportional(12.0),
+        ink,
+    );
+    let cross = egui::Stroke::new(1.4, ink);
+    let center = close.center();
+    painter.line_segment(
+        [
+            center + egui::vec2(-4.0, -4.0),
+            center + egui::vec2(4.0, 4.0),
+        ],
+        cross,
+    );
+    painter.line_segment(
+        [
+            center + egui::vec2(4.0, -4.0),
+            center + egui::vec2(-4.0, 4.0),
+        ],
+        cross,
+    );
+    if ui
+        .interact(close, egui::Id::new("lazr:close"), egui::Sense::click())
+        .clicked()
+    {
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+    ui.add_space(height);
+}
+
 impl eframe::App for LiveApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.watch();
@@ -1801,6 +1936,21 @@ impl eframe::App for LiveApp {
                 apply_icon_font(ui.ctx(), &path);
             }
             self.applied_icon_font = self.model.icon_font.clone();
+        }
+        if self.model.window.own {
+            let title = self.model.title.clone();
+            titlebar(ui, &title);
+        }
+        if self.model.window.drag_anywhere
+            && ui
+                .interact(
+                    ui.max_rect(),
+                    egui::Id::new("lazr:drag"),
+                    egui::Sense::drag(),
+                )
+                .drag_started()
+        {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(400));
         ui.label(
@@ -1922,10 +2072,31 @@ fn main() {
         println!("live headless ok: {} фигур", output.shapes.len());
         return;
     }
+    // Опции окна из модели — те же, что у сгенерированного приложения.
+    let window = &app.model.window;
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([width, height])
+        .with_title(title);
+    if window.own {
+        viewport = viewport.with_decorations(false);
+    }
+    if !window.resizable {
+        viewport = viewport.with_resizable(false);
+    }
+    if window.transparent {
+        viewport = viewport.with_transparent(true);
+    }
+    if window.topmost {
+        viewport = viewport.with_window_level(egui::WindowLevel::AlwaysOnTop);
+    }
+    if let Some((w, h)) = window.min {
+        viewport = viewport.with_min_inner_size([w as f32, h as f32]);
+    }
+    if let Some((w, h)) = window.max {
+        viewport = viewport.with_max_inner_size([w as f32, h as f32]);
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([width, height])
-            .with_title(title),
+        viewport,
         ..Default::default()
     };
     let _ = eframe::run_native(

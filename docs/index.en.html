@@ -208,6 +208,15 @@ problems: 0
   <div class="shot"><img src="dashboard.png" alt="Dashboard window: three cards in a row, a journal below, buttons in the corners"></div>
 </section>
 
+<section id="window">
+  <h2>Your own window frame</h2>
+  <p class="sub">The window is part of the model. The system frame can be switched off, and then the app draws
+    its own title and close cross; plus "always on top", a fixed size, size limits and dragging by any point.</p>
+  <div class="term"><span class="p">window</span> "Player" 480 520 chrome:own topmost:yes drag-anywhere:yes min:420x460</div>
+  <p class="sub">Verified by hand: no system title bar, a click on the app's own cross terminates the process, and
+    <code>lazr live</code> draws the same frame as the built app.</p>
+</section>
+
 <section id="styles">
   <h2>42 styles, one line each</h2>
   <p class="sub">A style is data. The repo ships <code>skills/design-styles/SKILL.md</code>:

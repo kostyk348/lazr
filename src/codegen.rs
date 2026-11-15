@@ -1137,12 +1137,12 @@ impl State {{
     }}
 }}
 
-{fns}{widgets}{actions_code}pub fn draw(state: &mut State, ui: &mut egui::Ui) {{
+{fns}{widgets}{actions_code}{chrome_fn}pub fn draw(state: &mut State, ui: &mut egui::Ui) {{
     // eframe 0.37 отдаёт голый Ui: фон окна никто не рисует, и светлая тема
     // выглядела чёрной. Красим панель сами — цвет берём из темы.
     let background = ui.visuals().panel_fill;
     ui.painter().rect_filled(ui.max_rect(), 0.0, background);
-{body}}}
+{chrome_call}{body}}}
 
 struct App {{
     state: State,
@@ -1203,7 +1203,7 @@ fn main() {{
     let options = eframe::NativeOptions {{
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([{width}f32, {height}f32])
-            .with_title({title}),
+            .with_title({title}){viewport},
         ..Default::default()
     }};
     let _ = eframe::run_native(
@@ -1223,7 +1223,105 @@ fn main() {{
         width = screen.width,
         height = screen.height,
         title = rust_string(&screen.title),
+        viewport = viewport_code(screen),
+        chrome_fn = chrome_function(screen),
+        chrome_call = chrome_call(screen),
     ))
+}
+
+/// Опции окна в ViewportBuilder: рамка, размер, всегда сверху, минимум/максимум.
+fn viewport_code(screen: &Screen) -> String {
+    use crate::model::Chrome;
+    let window = &screen.window;
+    let mut code = String::new();
+    if window.chrome == Chrome::Own {
+        code.push_str("\n            .with_decorations(false)");
+    }
+    if !window.resizable {
+        code.push_str("\n            .with_resizable(false)");
+    }
+    if window.transparent {
+        code.push_str("\n            .with_transparent(true)");
+    }
+    if window.topmost {
+        code.push_str("\n            .with_window_level(egui::WindowLevel::AlwaysOnTop)");
+    }
+    if let Some((w, h)) = window.min {
+        code.push_str(&format!(
+            "\n            .with_min_inner_size([{w}f32, {h}f32])"
+        ));
+    }
+    if let Some((w, h)) = window.max {
+        code.push_str(&format!(
+            "\n            .with_max_inner_size([{w}f32, {h}f32])"
+        ));
+    }
+    code
+}
+
+/// Своя рамка: заголовок, перетаскивание, крестик. Рисуется без шрифтов —
+/// крестик это две линии, поэтому глифы не нужны.
+fn chrome_function(screen: &Screen) -> String {
+    use crate::model::Chrome;
+    if screen.window.chrome != Chrome::Own {
+        return String::new();
+    }
+    format!(
+        r#"/// Своя рамка окна: потянуть — переехать, крестик — закрыть.
+fn titlebar(ui: &mut egui::Ui, title: &str) {{
+    let height = 30.0;
+    let rect = egui::Rect::from_min_size(ui.max_rect().min, egui::vec2(ui.available_width(), height));
+    let drag = ui.interact(rect, egui::Id::new("lazr:titlebar"), egui::Sense::click_and_drag());
+    if drag.drag_started() {{
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }}
+    let close = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - 16.0, rect.center().y),
+        egui::vec2(24.0, 24.0),
+    );
+    let painter = ui.painter().clone();
+    let fill = if drag.hovered() {{
+        ui.visuals().widgets.hovered.bg_fill
+    }} else {{
+        ui.visuals().widgets.inactive.bg_fill
+    }};
+    painter.rect_filled(rect, egui::CornerRadius::ZERO, fill);
+    let ink = ui.visuals().strong_text_color();
+    painter.text(
+        egui::pos2(rect.left() + 10.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title,
+        egui::FontId::proportional(12.0),
+        ink,
+    );
+    let cross = egui::Stroke::new(1.4, ink);
+    let c = close.center();
+    painter.line_segment([c + egui::vec2(-4.0, -4.0), c + egui::vec2(4.0, 4.0)], cross);
+    painter.line_segment([c + egui::vec2(4.0, -4.0), c + egui::vec2(-4.0, 4.0)], cross);
+    if ui.interact(close, egui::Id::new("lazr:close"), egui::Sense::click()).clicked() {{
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+    }}
+    ui.add_space(height);
+}}
+
+"#
+    )
+}
+
+/// Вызов рамки и «тянуть всё окно», если так сказано в модели.
+fn chrome_call(screen: &Screen) -> String {
+    use crate::model::Chrome;
+    let mut code = String::new();
+    if screen.window.chrome == Chrome::Own {
+        let title = rust_string(&screen.title);
+        code.push_str(&format!("    titlebar(ui, {title});\n"));
+    }
+    if screen.window.drag_anywhere {
+        code.push_str(
+            "    if ui.interact(ui.max_rect(), egui::Id::new(\"lazr:drag\"), egui::Sense::drag()).drag_started() {\n        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);\n    }\n",
+        );
+    }
+    code
 }
 
 pub fn count_widgets(widgets: &[Widget]) -> usize {
@@ -1237,6 +1335,41 @@ pub fn count_widgets(widgets: &[Widget]) -> usize {
 mod tests {
     use super::*;
     use crate::model::parse;
+
+    #[test]
+    fn own_chrome_emits_frameless_window_and_titlebar() {
+        let screen = parse(
+            r#"window "Т" 420 300 chrome:own topmost:yes min:360x240
+label "x""#,
+        )
+        .expect("окно");
+        let source = main_rs(&screen, "t").expect("генерация");
+        assert!(
+            source.contains(".with_decorations(false)"),
+            "рамка не отключена"
+        );
+        assert!(
+            source.contains(".with_window_level(egui::WindowLevel::AlwaysOnTop)"),
+            "нет «всегда сверху»"
+        );
+        assert!(source.contains(".with_min_inner_size([360f32, 240f32])"));
+        assert!(
+            source.contains("fn titlebar(ui: &mut egui::Ui"),
+            "нет своей рамки"
+        );
+        assert!(
+            source.contains("titlebar(ui, \"Т\")"),
+            "рамка не вызывается"
+        );
+    }
+
+    #[test]
+    fn system_chrome_has_no_titlebar() {
+        let screen = parse("window \"Т\" 420 300\nlabel \"x\"").expect("окно");
+        let source = main_rs(&screen, "t").expect("генерация");
+        assert!(!source.contains("fn titlebar"));
+        assert!(!source.contains("with_decorations(false)"));
+    }
 
     fn sample() -> Screen {
         parse(
