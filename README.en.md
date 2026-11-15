@@ -249,6 +249,26 @@ delete button. Three operations in handlers:
 Types are checked: `append n 1` on an `int` field is the error "«n» is not a list, it is int" — not a runtime
 panic.
 
+## Conditions
+
+`when` is a container: its children are drawn only when the condition holds. The condition is compiled by the
+same language as handlers, so type errors surface before the build.
+
+```lisp
+(when (>= score 3) (label "great" :color "#39d353"))
+(when (!= code "42") (label "closed" :color "#e5484d"))
+(when agree (label "consent given"))
+```
+
+The line model says the same, with the condition after the name:
+
+```
+when tries >= 3
+  label "hint: 42"
+```
+
+Comparisons: `> < >= <= == !=`, strings included (`code == "42"`), and a bare boolean field (`when agree`).
+
 ## Demos
 
 All of them live in `examples/` and all are machine-checked (`lazr live <file> --problems` → 0, `--check` prints
@@ -262,6 +282,8 @@ the effect of every action):
 | `settings.lisp` | Settings: light theme, checkbox, slider, text input, `do` with two assignments |
 | `quiz.lisp` | Quiz: two counters, several actions in one button |
 | `todo.lisp` / `.lazr` | Tasks: a list of strings, `append`/`remove`/`clear`, text input, counters |
+| `gate.lisp` / `.lazr` | Access: string comparison and conditionally shown panels |
+| `thermostat.lisp` | Thermostat: numbers, thresholds and gated panels |
 | `live-demo.lisp` / `.lazr` | Runtime showcase: edit the file, the window follows without a rebuild |
 
 A custom widget cannot exist in the runtime (it is Rust code), so `custom` is drawn as an honest placeholder

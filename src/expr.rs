@@ -517,6 +517,42 @@ fn rust_string(text: &str) -> String {
     out
 }
 
+/// Скомпилировать условие для раскладки: `when count > 5`, `when agree`.
+pub fn compile_condition(screen: &Screen, source: &str) -> Result<String, ExprError> {
+    let text = source.trim();
+    if text.is_empty() {
+        return Err(ExprError::new("у when нет условия", "when count > 5"));
+    }
+    let toks = lex(text)?;
+    // одно поле-флаг — уже условие: when agree
+    if let (Tok::Ident(name), Tok::Eof) = (
+        toks.first().cloned().unwrap_or(Tok::Eof),
+        toks.get(1).cloned().unwrap_or(Tok::Eof),
+    ) {
+        if let Some(field) = screen.fields.iter().find(|field| field.name == name) {
+            if field.ty == FieldType::Bool {
+                return Ok(format!("state.{name}"));
+            }
+        }
+    }
+    let mut parser = Parser {
+        toks,
+        pos: 0,
+        screen,
+    };
+    let (code, ty) = parser.comparison()?;
+    if !matches!(parser.peek(), Tok::Eof) {
+        return Err(ExprError::new("в условии лишний текст", "when count > 5"));
+    }
+    if ty != Ty::Bool {
+        return Err(ExprError::new(
+            "условие должно быть логическим",
+            "count > 5",
+        ));
+    }
+    Ok(code)
+}
+
 /// Скомпилировать действие в Rust-код.
 pub fn compile(screen: &Screen, source: &str) -> Result<String, ExprError> {
     let text = source.trim();

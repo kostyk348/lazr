@@ -65,6 +65,8 @@ struct Node {
     anchor: (bool, bool),
     /// Обработчик как форма: исполняется, а не пересказывается строкой.
     handler: Option<Sexp>,
+    /// Условие when формой (S-выражения) — строчное лежит в text.
+    cond_form: Option<Sexp>,
     children: Vec<Node>,
 }
 
@@ -151,7 +153,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
     let mut stack: Vec<(usize, Vec<usize>)> = vec![(0, Vec::new())];
     let known = [
         "label", "button", "checkbox", "text_input", "slider", "space", "separator", "vbox", "hbox", "grid",
-        "scroll", "place", "list", "custom",
+        "scroll", "place", "list", "when", "custom",
     ];
     let mut in_rust = false;
     // глубина фигурных скобок внутри блока rust: внутри бывают свои «}»,
@@ -257,8 +259,18 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
         };
         let container = matches!(
             head.as_str(),
-            "vbox" | "hbox" | "grid" | "scroll" | "place"
+            "vbox" | "hbox" | "grid" | "scroll" | "place" | "when"
         );
+        if head == "when" {
+            // условие — всё до первого стиля
+            let cond: Vec<String> = words
+                .iter()
+                .skip(1)
+                .take_while(|word| !word.starts_with('{'))
+                .cloned()
+                .collect();
+            node.text = cond.join(" ");
+        }
         let mut index = 1;
         if !container {
             if let Some(first) = words.get(1) {
@@ -613,10 +625,31 @@ fn current_is_text(value: &Value) -> bool {
     matches!(value, Value::Text(_))
 }
 
+/// Текст значения: литерал в кавычках или строковое поле.
+fn text_of(state: &HashMap<String, Value>, text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
+        return Some(text[1..text.len() - 1].to_string());
+    }
+    match state.get(text) {
+        Some(Value::Text(value)) => Some(value.clone()),
+        _ => None,
+    }
+}
+
 fn eval_condition(state: &HashMap<String, Value>, condition: &str) -> bool {
     let ops = [" >= ", " <= ", " == ", " != ", " > ", " < "];
     for op in ops {
         if let Some((left, right)) = condition.split_once(op) {
+            // текст сравниваем текстом: иначе "42" == "42" превращалось в 0 == 42
+            if matches!(op.trim(), "==" | "!=") {
+                if let (Some(a), Some(b)) = (
+                    text_of(state, left.trim()),
+                    text_of(state, right.trim()),
+                ) {
+                    return if op.trim() == "==" { a == b } else { a != b };
+                }
+            }
             let lhs = number_of(state, left.trim());
             let rhs: f32 = right.trim().trim_start_matches('"').trim_end_matches('"').parse().unwrap_or(0.0);
             return match op.trim() {
@@ -908,8 +941,28 @@ fn build_node(
         kind: kind.clone(),
         ..Default::default()
     };
-    let container = matches!(head, "vbox" | "hbox" | "grid" | "scroll" | "place");
+    let container = matches!(
+        head,
+        "vbox" | "hbox" | "grid" | "scroll" | "place" | "when"
+    );
     let mut index = 0;
+    if head == "when" {
+        match args.first() {
+            Some(Sexp::List(_)) => {
+                node.cond_form = args.first().cloned();
+                index = 1;
+            }
+            Some(Sexp::Sym(word)) => {
+                node.text = word.clone();
+                index = 1;
+            }
+            Some(other) => {
+                node.text = other.text().unwrap_or_default();
+                index = 1;
+            }
+            None => {}
+        }
+    }
     if !container {
         if let Some(first) = args.first() {
             match first {
@@ -1045,7 +1098,7 @@ fn build_node(
     if !matches!(
         kind.as_str(),
         "label" | "button" | "checkbox" | "text_input" | "slider" | "space" | "separator" | "vbox"
-            | "hbox" | "grid" | "scroll" | "place" | "list" | "custom"
+            | "hbox" | "grid" | "scroll" | "place" | "list" | "when" | "custom"
     ) {
         return Err(format!("форма «{head}» рантайму неизвестна"));
     }
@@ -1133,8 +1186,30 @@ fn eval_handler(state: &mut HashMap<String, Value>, form: &Sexp) {
 }
 
 fn eval_condition_sexp(state: &HashMap<String, Value>, form: &Sexp) -> bool {
-    let Sexp::List(items) = form else { return false };
+    let Sexp::List(items) = form else {
+        // (when agree …) — условие одним символом
+        return match form {
+            Sexp::Sym(name) if name == "true" => true,
+            Sexp::Sym(name) => matches!(state.get(name), Some(Value::Bool(true))),
+            _ => false,
+        };
+    };
     let op = items.first().and_then(Sexp::text).unwrap_or_default();
+    if matches!(op.as_str(), "==" | "!=") {
+        let text_of_sexp = |value: Option<&Sexp>| -> Option<String> {
+            match value {
+                Some(Sexp::Str(text)) => Some(text.clone()),
+                Some(Sexp::Sym(name)) => match state.get(name) {
+                    Some(Value::Text(text)) => Some(text.clone()),
+                    _ => None,
+                },
+                _ => None,
+            }
+        };
+        if let (Some(a), Some(b)) = (text_of_sexp(items.get(1)), text_of_sexp(items.get(2))) {
+            return if op == "==" { a == b } else { a != b };
+        }
+    }
     let left = items.get(1).map(|v| eval_expr_sexp(state, v)).unwrap_or(0.0);
     let right = items.get(2).map(|v| eval_expr_sexp(state, v)).unwrap_or(0.0);
     match op.as_str() {
@@ -1356,6 +1431,17 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
                 });
             }
             ui.advance_cursor_after_rect(canvas);
+        }
+        "when" => {
+            let truth = match &node.cond_form {
+                Some(form) => eval_condition_sexp(state, form),
+                None => eval_condition(state, &node.text),
+            };
+            if truth {
+                for child in &node.children {
+                    draw_node(ui, child, state);
+                }
+            }
         }
         "list" => {
             // строки с удалением; идём по копии, чтобы не спорить с заимствованием

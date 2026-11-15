@@ -436,7 +436,7 @@ impl Builder {
                 Ok(None)
             }
             "label" | "button" | "checkbox" | "text-input" | "slider" | "space" | "separator"
-            | "vbox" | "hbox" | "grid" | "scroll" | "place" | "list" | "custom" => {
+            | "vbox" | "hbox" | "grid" | "scroll" | "place" | "list" | "when" | "custom" => {
                 self.node(&head, args)
             }
             other => Err(LispError::new(
@@ -461,6 +461,7 @@ impl Builder {
             "scroll" => WidgetKind::Scroll,
             "place" => WidgetKind::Place,
             "list" => WidgetKind::List,
+            "when" => WidgetKind::When,
             "custom" => WidgetKind::Custom(
                 args.first()
                     .and_then(Value::text)
@@ -475,6 +476,19 @@ impl Builder {
         };
 
         let mut index = 0;
+        // У when первый аргумент — условие формой, а не подпись.
+        if head == "when" {
+            let cond = args.first().ok_or_else(|| {
+                LispError::new("(when условие …)", "(when (>= count 3) (label \"пора\"))")
+            })?;
+            // (when (>= count 3) …) — сравнение, (when agree …) — поле-флаг
+            widget.text = match cond {
+                Value::Sym(name) => name.clone(),
+                Value::Bool(flag) => flag.to_string(),
+                other => condition(other)?,
+            };
+            index = 1;
+        }
         // Текст и обработчик — позиционные, остальное — ключевые слова.
         let numeric_head = matches!(head, "space" | "grid" | "place");
         if !kind.is_container() && !matches!(kind, WidgetKind::Custom(_)) && !numeric_head {
@@ -928,5 +942,18 @@ mod tests {
         assert!(effect.contains("append items"), "{effect}");
         let clear = model.screen.root[1].effect.clone().unwrap();
         assert_eq!(clear, "clear items");
+    }
+
+    #[test]
+    fn when_form_carries_condition() {
+        let forms = crate::lang::read(
+            "(window \"П\" 400 300)\n(state n int 0)\n(when (>= n 3) (label \"пора\"))\n",
+        )
+        .unwrap();
+        let model = crate::lang::eval(&forms).unwrap();
+        let node = &model.screen.root[0];
+        assert_eq!(node.kind, crate::model::WidgetKind::When);
+        assert_eq!(node.text, "n >= 3");
+        assert_eq!(node.children.len(), 1);
     }
 }

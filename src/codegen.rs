@@ -644,6 +644,13 @@ fn emit_widget(
                 out.push_str(&format!("{pad}ui.vertical(|ui| {{\n{body}{pad}}});\n"));
             }
         }
+        WidgetKind::When => {
+            // Условие компилируется тем же языком, что и обработчики: типы проверяются.
+            let condition = expr::compile_condition(screen, &widget.text)
+                .map_err(|err| format!("when: {} ({})", err.message, err.hint))?;
+            let body = emit_widgets(&widget.children, screen, depth + 1, emit)?;
+            out.push_str(&format!("{pad}if {condition} {{\n{body}{pad}}}\n"));
+        }
         WidgetKind::Hbox => {
             let body = emit_widgets(&widget.children, screen, depth + 1, emit)?;
             out.push_str(&format!("{pad}ui.horizontal(|ui| {{\n{body}{pad}}});\n"));
@@ -1087,5 +1094,13 @@ checkbox "Согласен" -> agree
         assert_eq!(crate_name("Краски"), "kraski");
         assert_eq!(crate_name("My App!"), "my-app");
         assert_eq!(crate_name("123go"), "app-123go");
+    }
+
+    #[test]
+    fn when_becomes_if_in_code() {
+        let screen =
+            crate::model::parse("state value int 5\nwhen value > 2\n  label \"видно\"\n").unwrap();
+        let code = main_rs(&screen, "app").unwrap();
+        assert!(code.contains("if state.value > 2 {"), "{code}");
     }
 }

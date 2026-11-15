@@ -66,6 +66,24 @@ jobs:
           cargo run -q -- live examples/live-demo.lazr --check | tee /tmp/live-check.txt
           grep -q 'count: 0 → 1' /tmp/live-check.txt
           grep -q 'check ok: действий 3' /tmp/live-check.txt
+      - name: when скрывает и показывает панели (рантайм)
+        run: |
+          mkdir -p /tmp/when-ci
+          printf '(window "A" 300 200)\n(state v int 5)\n(vbox\n  (when (> v 2) (label "видно")))\n' > /tmp/when-ci/yes.lisp
+          printf '(window "A" 300 200)\n(vbox\n  (when (> v 99) (label "не видно")))\n' > /tmp/when-ci/no.lisp
+          cargo run -q -- live /tmp/when-ci/yes.lisp --headless | tee /tmp/when-ci/yes.txt
+          cargo run -q -- live /tmp/when-ci/no.lisp --headless | tee /tmp/when-ci/no.txt
+          grep -q '1 фигур' /tmp/when-ci/yes.txt
+          grep -q '0 фигур' /tmp/when-ci/no.txt
+      - name: when превращается в if (генератор)
+        run: |
+          mkdir -p /tmp/when-gen
+          printf 'state value int 5\nwhen value > 2\n  label "видно"\n' > /tmp/when-gen/form.lazr
+          printf 'window "A" 300 200\n' | cat - /tmp/when-gen/form.lazr > /tmp/when-gen/full.lazr
+          mv /tmp/when-gen/full.lazr /tmp/when-gen/form.lazr
+          cargo run -q -- build /tmp/when-gen
+          cargo run -q -- headless /tmp/when-gen | tee /tmp/when-gen/out.txt
+          grep -q '1 фигур' /tmp/when-gen/out.txt
       - name: списки работают в сгенерированном приложении
         run: |
           cargo run -q -- lisp examples/todo.lisp --to /tmp/ci-todo

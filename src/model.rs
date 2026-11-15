@@ -175,6 +175,8 @@ pub enum WidgetKind {
     Place,
     /// Список строк: строки с кнопкой удаления, привязан к полю типа list.
     List,
+    /// Условная видимость: показывает детей только когда условие истинно.
+    When,
     Custom(String),
 }
 
@@ -194,6 +196,7 @@ impl WidgetKind {
             WidgetKind::Scroll => "scroll",
             WidgetKind::Place => "place",
             WidgetKind::List => "list",
+            WidgetKind::When => "when",
             WidgetKind::Custom(_) => "custom",
         }
     }
@@ -205,6 +208,7 @@ impl WidgetKind {
                 | WidgetKind::Grid
                 | WidgetKind::Scroll
                 | WidgetKind::Place
+                | WidgetKind::When
         )
     }
     pub fn parse_kind(text: &str) -> Option<WidgetKind> {
@@ -222,6 +226,7 @@ impl WidgetKind {
             "scroll" => WidgetKind::Scroll,
             "place" => WidgetKind::Place,
             "list" => WidgetKind::List,
+            "when" => WidgetKind::When,
             _ => return None,
         })
     }
@@ -240,6 +245,7 @@ impl WidgetKind {
             "scroll",
             "place",
             "list",
+            "when",
             "custom",
         ]
     }
@@ -855,6 +861,20 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                             }),
                         }
                         i += 1;
+                    } else if matches!(widget.kind, WidgetKind::When) {
+                        // У контейнера when текст — это условие, а не подпись.
+                        // Строковый литерал возвращаем в кавычки: code == "42".
+                        if !widget.text.is_empty() {
+                            widget.text.push(' ');
+                        }
+                        if was_quoted {
+                            widget.text.push('"');
+                            widget.text.push_str(&token.replace('"', "\\\""));
+                            widget.text.push('"');
+                        } else {
+                            widget.text.push_str(&token);
+                        }
+                        i += 1;
                     } else if token == "do" {
                         // Стиль и привязка живут после действия — в него не входят.
                         let mut end = rest.len();
@@ -1031,6 +1051,16 @@ fn validate(screen: &Screen, errors: &mut Vec<ModelError>) {
                         code: "NO_SUCH_FIELD",
                         message: format!("привязка к неизвестному полю «{bind}»"),
                         hint: format!("объявите: state {bind} <тип>"),
+                    });
+                }
+            }
+            if matches!(widget.kind, WidgetKind::When) {
+                if let Err(err) = expr::compile_condition(screen, &widget.text) {
+                    errors.push(ModelError {
+                        line: 0,
+                        code: "BAD_CONDITION",
+                        message: err.message,
+                        hint: err.hint,
                     });
                 }
             }
@@ -1350,5 +1380,29 @@ theme dark accent:#388bfd font:16 spacing:12 round:10
         let screen = parse("state draft string\nbutton \"x\" do draft = \"ок\"\n").unwrap();
         let effect = screen.root[0].effect.clone().unwrap();
         assert!(effect.contains('"'), "кавычки потерялись: {effect}");
+    }
+
+    #[test]
+    fn when_parses_as_gated_container() {
+        let screen = parse("state value int 5\nwhen value > 2\n  label \"видно\"\n").unwrap();
+        let node = &screen.root[0];
+        assert_eq!(node.kind, WidgetKind::When);
+        assert_eq!(node.text, "value > 2");
+        assert_eq!(node.children.len(), 1);
+    }
+
+    #[test]
+    fn when_rejects_bad_condition() {
+        let errors = parse("state value int 5\nwhen value > nope\n  label \"x\"\n").unwrap_err();
+        assert!(
+            errors.iter().any(|e| e.code == "BAD_CONDITION"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn when_keeps_string_literal() {
+        let screen = parse("state code string\nwhen code == \"42\"\n  label \"ок\"\n").unwrap();
+        assert_eq!(screen.root[0].text, "code == \"42\"");
     }
 }
