@@ -9,6 +9,7 @@
 (state volume int 80)
 (state playlist list)
 (state current string "")
+(rust-field last_volume "i64" "80")
 
 (rust-widget deck """
 // --- управление mpv по IPC-сокету: std-only --------------------------------
@@ -31,6 +32,18 @@ fn mpv_position() -> f64 {
         return 0.0;
     };
     // ответ вида {"data":12.3,"request_id":0,"error":"success"}
+    let Some(start) = answer.find("\"data\":") else {
+        return 0.0;
+    };
+    let rest = &answer[start + 7..];
+    let end = rest.find(',').unwrap_or(rest.len());
+    rest[..end].trim().parse().unwrap_or(0.0)
+}
+
+fn mpv_duration() -> f64 {
+    let Some(answer) = mpv_send("\"get_property\", \"duration\"") else {
+        return 0.0;
+    };
     let Some(start) = answer.find("\"data\":") else {
         return 0.0;
     };
@@ -152,6 +165,41 @@ painter.text(
     egui::FontId::proportional(15.0),
     egui::Color32::from_rgb(230, 236, 246),
 );
+
+// --- громкость ползунка сразу уходит в mpv --------------------------------
+if state.volume != state.last_volume {
+    mpv_set("volume", &state.volume.to_string());
+    state.last_volume = state.volume;
+}
+
+// --- полоса прогресса: pos / duration прямо из mpv -------------------------
+if state.playing && mpv_running() {
+    let duration = mpv_duration();
+    if duration > 1.0 {
+        let ratio = (state.pos as f64 / duration).clamp(0.0, 1.0) as f32;
+        let track = egui::Rect::from_min_max(
+            egui::pos2(screen_rect.left() + 12.0, screen_rect.bottom() - 12.0),
+            egui::pos2(screen_rect.right() - 12.0, screen_rect.bottom() - 5.0),
+        );
+        painter.rect_filled(track, egui::CornerRadius::same(3), egui::Color32::from_rgb(30, 42, 58));
+        if ratio > 0.0 {
+            let done = egui::Rect::from_min_max(
+                track.left_top(),
+                egui::pos2(track.left() + track.width() * ratio, track.bottom()),
+            );
+            painter.rect_filled(done, egui::CornerRadius::same(3), egui::Color32::from_rgb(34, 211, 238));
+        }
+        // «0:04 / 0:48» справа над полосой: видно, где мы внутри трека
+        let clock = |seconds: f64| format!("{}:{:02}", (seconds as i64) / 60, (seconds as i64) % 60);
+        painter.text(
+            egui::pos2(screen_rect.right() - 12.0, screen_rect.bottom() - 20.0),
+            egui::Align2::RIGHT_CENTER,
+            format!("{} / {}", clock(state.pos as f64), clock(duration)),
+            egui::FontId::proportional(11.0),
+            egui::Color32::from_rgb(154, 173, 191),
+        );
+    }
+}
 
 // --- позиция: спрашиваем mpv раз в полсекунды ------------------------------
 if state.playing && mpv_running() {
