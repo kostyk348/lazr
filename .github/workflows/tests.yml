@@ -182,6 +182,7 @@ jobs:
             dir=/tmp/lisp-$name
             rm -rf "$dir" && mkdir -p "$dir"
             cp "$model" "$dir/form.lisp"
+            cp examples/*.css "$dir/app/" 2>/dev/null || true
             cargo run -q -- lisp "$dir/form.lisp" --to "$dir/app"
             cargo run -q -- build "$dir/app"
             cargo run -q -- verify "$dir/app" | tail -1

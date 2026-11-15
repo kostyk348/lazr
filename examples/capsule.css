@@ -1,0 +1,23 @@
+/* Стиль планировщика — отдельной таблицей, а не в каждом виджете. */
+window {
+  dark: yes;
+  accent: #7c9cff;
+  panel: #15161b;
+  card: #1e1f26;
+  muted: #9aa3b8;
+  font: 15;
+  spacing: 8;
+  round: 14;
+  chrome: own;
+  min: 820x620;
+}
+
+label { color: #e5e7f0; size: 14; }
+label.meta { color: #9aa3b8; size: 11; mono; }
+label.strong { color: #eef1ff; size: 26; }
+label.pill { pill; size: 11; color: #0b0d12; }
+label.row { grow; size: 14; }
+
+button { size: 12; }
+card { pad: 14; }
+list { spacing: 6; }

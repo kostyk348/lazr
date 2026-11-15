@@ -99,6 +99,12 @@ pub struct Style {
     pub key: Option<String>,
     /// Имя иконки из встроенного набора lazr.
     pub icon: Option<String>,
+    /// Пилюля/чип: подпись на закруглённой плашке акцентного цвета.
+    pub pill: bool,
+    /// Классы для таблицы стилей (через запятую или пробел).
+    pub classes: Option<String>,
+    /// Идентификатор для таблицы стилей.
+    pub id: Option<String>,
     /// Моноширинный шрифт — для терминалов, кода и ретро-стилей.
     pub mono: bool,
     /// Подсказка при наведении.
@@ -118,6 +124,9 @@ impl Style {
             && self.key.is_none()
             && self.icon.is_none()
             && !self.mono
+            && !self.pill
+            && self.classes.is_none()
+            && self.id.is_none()
             && self.hint.is_none()
     }
     pub fn as_str(&self) -> String {
@@ -139,6 +148,15 @@ impl Style {
         }
         if self.mono {
             parts.push("mono".to_string());
+        }
+        if self.pill {
+            parts.push("pill".to_string());
+        }
+        if let Some(classes) = &self.classes {
+            parts.push(format!("class:\"{classes}\""));
+        }
+        if let Some(id) = &self.id {
+            parts.push(format!("id:\"{id}\""));
         }
         if let Some(hint) = &self.hint {
             parts.push(format!("hint:\"{hint}\""));
@@ -297,6 +315,10 @@ pub struct Widget {
     /// Якорь: (справа, снизу) — точка считается от правого/нижнего края.
     pub anchor: (bool, bool),
     pub style: Style,
+    /// Классы из модели (`{class:"meta"}`) — по ним бьёт таблица стилей.
+    pub css_classes: Vec<String>,
+    /// Идентификатор (`{id:"title"}`) — самый сильный селектор.
+    pub css_id: Option<String>,
     pub children: Vec<Widget>,
 }
 
@@ -313,6 +335,8 @@ impl Widget {
             box_size: None,
             anchor: (false, false),
             style: Style::default(),
+            css_classes: Vec::new(),
+            css_id: None,
             children: Vec::new(),
         }
     }
@@ -515,6 +539,8 @@ pub struct Screen {
     pub store: Option<String>,
     /// PNG с иконкой окна: разбирается своим декодером на сборке.
     pub window_icon: Option<String>,
+    /// Таблица стилей (CSS-подобная), если модель на неё ссылается.
+    pub style_sheet: Option<String>,
     /// Свой TTF для текста интерфейса (Inter, JetBrains Mono, …).
     pub ui_font: Option<String>,
     /// Рамка, всегда сверху, минимум/максимум размера, перетаскивание.
@@ -697,7 +723,8 @@ pub fn is_style_token(token: &str) -> bool {
     // Стиль — это блок, где КАЖДАЯ часть либо ключ:значение из известных,
     // либо известный флаг. Блок действия «{ count = 0 }» стилем не считается,
     // иначе код действия уезжает в стили.
-    const KEYS: [&str; 14] = [
+    const KEYS: &[&str] = &[
+        "class", "classes", "класс", "id",
         "size",
         "кегль",
         "color",
@@ -713,7 +740,9 @@ pub fn is_style_token(token: &str) -> bool {
         "key",
         "icon",
     ];
-    const EXTRA: [&str; 6] = ["mono", "моно", "hint", "подсказка", "center", "right"];
+    const EXTRA: &[&str] = &[
+        "mono", "моно", "hint", "подсказка", "center", "right", "pill", "чип", "плашка",
+    ];
     let inner = &token[1..token.len() - 1];
     let mut parts = 0;
     for part in inner.split(',') {
@@ -759,6 +788,11 @@ fn parse_style(text: &str) -> Result<Style, String> {
             }
             "bold" => style.bold = true,
             "mono" | "моно" => style.mono = true,
+            "pill" | "чип" | "плашка" => style.pill = true,
+            "class" | "classes" | "класс" => {
+                style.classes = Some(value.trim_matches('"').to_string());
+            }
+            "id" => style.id = Some(value.trim_matches('"').to_string()),
             "hint" | "подсказка" => {
                 style.hint = Some(value.trim_matches('"').to_string());
             }
@@ -828,6 +862,32 @@ fn net_braces(line: &str) -> i32 {
     depth
 }
 
+/// Разбор модели вместе с таблицей стилей: каскад применяется после разбора,
+/// поэтому стиль прямо в модели остаётся сильнее таблицы.
+pub fn parse_with_sheet(
+    text: &str,
+    sheet: Option<&str>,
+) -> Result<Screen, Vec<ModelError>> {
+    let mut screen = parse(text)?;
+    if let Some(sheet) = sheet {
+        match crate::css::parse(sheet) {
+            Ok(rules) => {
+                crate::css::apply_theme(&rules, &mut screen.theme, &mut screen.window);
+                crate::css::apply(&mut screen.root, &rules, &mut screen.theme, &mut screen.window);
+            }
+            Err(message) => {
+                return Err(vec![ModelError {
+                    line: 1,
+                    code: "BAD_STYLE_SHEET",
+                    message,
+                    hint: crate::css::HELP.to_string(),
+                }])
+            }
+        }
+    }
+    Ok(screen)
+}
+
 pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
     let mut errors: Vec<ModelError> = Vec::new();
     let mut screen = Screen {
@@ -841,6 +901,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         icon_font: None,
         store: None,
         window_icon: None,
+        style_sheet: None,
         ui_font: None,
         window: WindowOptions::default(),
         root: Vec::new(),
@@ -1116,6 +1177,15 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     hint: "window-icon \"icon.png\"".into(),
                 }),
             },
+            "style-sheet" | "style_sheet" | "стили" => match words.get(1) {
+                Some(path) => screen.style_sheet = Some(path.trim_matches('"').to_string()),
+                None => errors.push(ModelError {
+                    line: line_no,
+                    code: "STYLE_SHEET_NEEDS_PATH",
+                    message: "у style-sheet нет пути к файлу".into(),
+                    hint: "style-sheet \"style.css\"".into(),
+                }),
+            },
             "store" | "хранилище" | "state-file" => match words.get(1) {
                 Some(path) => screen.store = Some(path.trim_matches('"').to_string()),
                 None => errors.push(ModelError {
@@ -1167,13 +1237,48 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     });
                     continue;
                 };
-                let value = words.get(3).cloned().unwrap_or_else(|| match ty {
-                    FieldType::Str => String::new(),
-                    FieldType::Bool => "false".into(),
-                    FieldType::Int => "0".into(),
-                    FieldType::Float => "0.0".into(),
-                    FieldType::List => String::new(),
-                });
+                // Значение может быть в кавычках и с пробелами: берём хвост строки
+                // целиком (после типа) и снимаем кавычки.
+                let raw_value: String = {
+                    let trimmed = line.trim_start();
+                    // пропускаем: state, имя, тип
+                    let mut rest = trimmed.split_whitespace();
+                    let _ = rest.next(); // state
+                    let _ = rest.next(); // имя
+                    let _ = rest.next(); // тип
+                    match rest.next() {
+                        Some(_) => {
+                            let after_type = trimmed
+                                .trim_start_matches(char::is_whitespace);
+                            // отрезаем три первых токена простым проходом
+                            let mut cursor = after_type;
+                            for _ in 0..3 {
+                                let start = cursor.len() - cursor.trim_start().len();
+                                cursor = &cursor[start..];
+                                match cursor.find(char::is_whitespace) {
+                                    Some(end) => cursor = &cursor[end..],
+                                    None => {
+                                        cursor = "";
+                                        break;
+                                    }
+                                }
+                            }
+                            cursor.trim().to_string()
+                        }
+                        None => String::new(),
+                    }
+                };
+                let value = if raw_value.is_empty() {
+                    match ty {
+                        FieldType::Str => String::new(),
+                        FieldType::Bool => "false".into(),
+                        FieldType::Int => "0".into(),
+                        FieldType::Float => "0.0".into(),
+                        FieldType::List => String::new(),
+                    }
+                } else {
+                    raw_value.trim_matches('"').to_string()
+                };
                 screen.fields.push(Field {
                     name: words[1].clone(),
                     ty,
@@ -1604,11 +1709,13 @@ pub fn render(screen: &Screen) -> String {
     out.push_str(&window);
     out.push('\n');
     for field in &screen.fields {
+        // Значение в кавычках: «Свести требования к поиску» это одно значение,
+        // а не три слова, из которых выживает первое.
         out.push_str(&format!(
             "state {} {} {}\n",
             field.name,
             field.ty.as_str(),
-            field.value
+            quote(&field.value)
         ));
     }
     if let Some(path) = &screen.icon_font {
@@ -1622,6 +1729,9 @@ pub fn render(screen: &Screen) -> String {
     }
     if let Some(path) = &screen.window_icon {
         out.push_str(&format!("window-icon {}\n", quote(path)));
+    }
+    if let Some(path) = &screen.style_sheet {
+        out.push_str(&format!("style-sheet {}\n", quote(path)));
     }
     for field in &screen.rust_fields {
         out.push_str(&format!(

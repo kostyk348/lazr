@@ -640,6 +640,7 @@ mod tests {
             icon_font: None,
             store: None,
             window_icon: None,
+            style_sheet: None,
             ui_font: None,
             window: crate::model::WindowOptions::default(),
             root: Vec::new(),

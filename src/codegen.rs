@@ -719,18 +719,46 @@ fn emit_widget(
                 Some(tip) => format!(".on_hover_text({})", rust_string(tip)),
                 None => String::new(),
             };
-            out.push_str(&format!("{pad}ui.label({text}){hint};\n"));
+            if widget.style.pill {
+                // Пилюля: закруглённая плашка акцентного цвета, текст — по контрасту.
+                let accent = screen
+                    .theme
+                    .accent
+                    .as_deref()
+                    .and_then(color_code)
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "egui::Color32::from_rgb(34, 211, 238)".to_string());
+                out.push_str(&format!(
+                    "{pad}egui::Frame::new()\n{pad}    .fill({accent})\n{pad}    .corner_radius(egui::CornerRadius::same(255))\n{pad}    .inner_margin(egui::Margin::symmetric(9, 3))\n{pad}    .show(ui, |ui| {{\n{pad}        ui.label({text}){hint};\n{pad}    }});\n"
+                ));
+            } else {
+                out.push_str(&format!("{pad}ui.label({text}){hint};\n"));
+            }
         }
         WidgetKind::Button => {
             // Компактная кнопка-иконка: подписи нет, глиф из подключённого шрифта.
             if widget.text.trim().is_empty() {
                 if let Some(glyph) = widget.style.icon.as_deref().and_then(custom_glyph) {
                     let size = widget.style.size.unwrap_or(16.0);
-                    out.push_str(&format!(
-                        "{pad}if ui.button(egui::RichText::new({}).family(egui::FontFamily::Name(\"icons\".into())).size({})).clicked() {{\n",
+                    let button = format!(
+                        "ui.button(egui::RichText::new({}).family(egui::FontFamily::Name(\"icons\".into())).size({}))",
                         rust_string(&glyph),
                         float_lit(size)
-                    ));
+                    );
+                    // В шаблоне строки «remove items» и с глифом значит «удалить строку».
+                    if emit.row {
+                        if let Some(rest) =
+                            widget.effect.as_deref().map(str::trim).and_then(|e| e.strip_prefix("remove "))
+                        {
+                            if rest.split_whitespace().count() == 1 {
+                                out.push_str(&format!(
+                                    "{pad}if {button}.clicked() {{\n{pad}    remove_row = Some(i);\n{pad}}}\n"
+                                ));
+                                return Ok(out);
+                            }
+                        }
+                    }
+                    out.push_str(&format!("{pad}if {button}.clicked() {{\n"));
                     if let Some(effect) = &widget.effect {
                         let code = expr::compile(screen, effect)
                             .map_err(|err| format!("{}: {}", err.message, err.hint))?;
@@ -898,8 +926,14 @@ fn emit_widget(
             // Карточка: фон, рамка, скругление и отступы — из общего помощника.
             let pad_px = widget.style.pad.unwrap_or(12.0);
             let body = emit_widgets(&widget.children, screen, depth + 1, emit)?;
+            // Карточка не навязывает ширину: в hbox три карточки иначе съедали бы
+            // всю строку по очереди и уезжали друг под друга.
+            let width = match widget.style.width {
+                Some(width) => format!("{pad}    ui.set_width({});\n", float_lit(width)),
+                None => String::new(),
+            };
             out.push_str(&format!(
-                "{pad}card_frame(ui, {}).show(ui, |ui| {{\n{pad}    ui.set_width(ui.available_width());\n{body}{pad}}});\n",
+                "{pad}card_frame(ui, {}).show(ui, |ui| {{\n{width}{body}{pad}}});\n",
                 float_lit(pad_px)
             ));
         }
@@ -1550,7 +1584,7 @@ fn chrome_function(screen: &Screen) -> String {
 fn titlebar(ui: &mut egui::Ui, title: &str) {{
     let height = 30.0;
     let rect = egui::Rect::from_min_size(ui.max_rect().min, egui::vec2(ui.available_width(), height));
-    let drag = ui.interact(rect, ui.id().with("lazr:titlebar"), egui::Sense::click_and_drag());
+    let drag = ui.interact(rect, ui.scope_id().with("lazr:titlebar"), egui::Sense::click_and_drag());
     if drag.drag_started() {{
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }}
@@ -1583,7 +1617,7 @@ fn titlebar(ui: &mut egui::Ui, title: &str) {{
         ui.ctx()
             .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
     }}
-    if ui.interact(close, ui.id().with("lazr:close"), egui::Sense::click()).clicked() {{
+    if ui.interact(close, ui.scope_id().with("lazr:close"), egui::Sense::click()).clicked() {{
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
     }}
     ui.add_space(height);
@@ -1603,12 +1637,12 @@ fn chrome_call(screen: &Screen) -> String {
     }
     if screen.window.drag_anywhere {
         code.push_str(
-            "    if ui.interact(ui.max_rect(), ui.id().with(\"lazr:drag\"), egui::Sense::drag()).drag_started() {\n        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);\n    }\n",
+            "    if ui.interact(ui.max_rect(), ui.scope_id().with(\"lazr:drag\"), egui::Sense::drag()).drag_started() {\n        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);\n    }\n",
         );
     }
     if screen.window.center {
         code.push_str(&format!(
-            "    if !ui.data(|data| data.get_temp::<bool>(ui.id().with(\"lazr:centered\")).unwrap_or(false)) {{\n        if let Some(monitor) = ui.ctx().input(|input| input.viewport().monitor_size) {{\n            ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2((monitor.x - {}f32) / 2.0, (monitor.y - {}f32) / 2.0)));\n            ui.data_mut(|data| data.insert_temp(egui::Id::new(\"lazr:centered\"), true));\n        }}\n    }}\n",
+            "    if !ui.data(|data| data.get_temp::<bool>(ui.scope_id().with(\"lazr:centered\")).unwrap_or(false)) {{\n        if let Some(monitor) = ui.ctx().input(|input| input.viewport().monitor_size) {{\n            ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2((monitor.x - {}f32) / 2.0, (monitor.y - {}f32) / 2.0)));\n            ui.data_mut(|data| data.insert_temp(egui::Id::new(\"lazr:centered\"), true));\n        }}\n    }}\n",
             float_lit(screen.width as f32),
             float_lit(screen.height as f32)
         ));

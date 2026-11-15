@@ -262,6 +262,7 @@ pub fn eval(forms: &[Value]) -> Result<Evaluated, LispError> {
             icon_font: None,
             store: None,
             window_icon: None,
+            style_sheet: None,
             ui_font: None,
             window: crate::model::WindowOptions::default(),
             root: vec![Widget::container(WidgetKind::Vbox)],
@@ -360,6 +361,13 @@ impl Builder {
                     LispError::new("(window-icon \"icon.png\")", "путь к PNG строкой")
                 })?;
                 self.screen.window_icon = Some(path);
+                Ok(None)
+            }
+            "style-sheet" | "style_sheet" | "стили" => {
+                let path = args.first().and_then(Value::text).ok_or_else(|| {
+                    LispError::new("(style-sheet \"style.css\")", "путь к таблице стилей")
+                })?;
+                self.screen.style_sheet = Some(path);
                 Ok(None)
             }
             "store" | "хранилище" | "state-file" => {
@@ -820,6 +828,12 @@ impl Builder {
                     && !matches!(value.text().as_deref(), Some("no" | "false" | "нет"));
             }
             "hint" => style.hint = value.text(),
+            "class" | "classes" | "класс" => style.classes = value.text(),
+            "id" => style.id = value.text(),
+            "pill" | "чип" | "плашка" => {
+                style.pill = !matches!(value, Value::Bool(false))
+                    && !matches!(value.text().as_deref(), Some("no" | "false" | "нет"));
+            }
             "key" => style.key = value.text(),
             "icon" => style.icon = value.text(),
             "color" => style.color = value.text(),

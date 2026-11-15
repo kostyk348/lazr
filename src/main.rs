@@ -17,6 +17,7 @@
 use std::process::Command;
 
 mod codegen;
+mod css;
 mod expr;
 mod lang;
 mod live;
@@ -26,7 +27,7 @@ mod png;
 mod project;
 mod runtime;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use model::{FieldType, WidgetKind};
 use project::Project;
@@ -643,6 +644,28 @@ fn cmd_lisp(args: &[String]) -> i32 {
             if let Err(err) = project.save().and_then(|()| project.generate()) {
                 eprintln!("{err}");
                 return 1;
+            }
+            // Таблица стилей живёт рядом с моделью: копируем её в проект,
+            // иначе сборка не найдёт файл относительно app/.
+            if let Some(sheet) = project.screen.style_sheet.clone() {
+                if let Some(source_dir) = std::path::Path::new(
+                    positional.first().map(String::as_str).unwrap_or("form.lisp"),
+                )
+                .parent()
+                .map(Path::to_path_buf)
+                {
+                    let from = source_dir.join(&sheet);
+                    let to = project.dir.join(&sheet);
+                    if from.exists() {
+                        if let Some(parent) = to.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        if let Err(err) = std::fs::copy(&from, &to) {
+                            eprintln!("не скопировать таблицу стилей {}: {err}", to.display());
+                            return 1;
+                        }
+                    }
+                }
             }
             println!("проект из DSL: {}", project.dir.display());
             println!("  модель: {}", project.form_path().display());

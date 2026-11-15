@@ -22,7 +22,27 @@ impl Project {
         let path = dir.join(FORM);
         let text = std::fs::read_to_string(&path)
             .map_err(|err| format!("не прочитать {}: {err}", path.display()))?;
-        let screen = model::parse(&text).map_err(|errors| {
+        // Таблица стилей лежит рядом с моделью: путь в модели относительный.
+        let sheet = text.lines().find_map(|line| {
+            let line = line.trim();
+            let rest = line
+                .strip_prefix("style-sheet")
+                .or_else(|| line.strip_prefix("style_sheet"))
+                .or_else(|| line.strip_prefix("стили"))?;
+            let path = rest.trim().trim_matches('"');
+            if path.is_empty() {
+                None
+            } else {
+                Some(dir.join(path))
+            }
+        });
+        let sheet_text = match sheet {
+            Some(path) => Some(std::fs::read_to_string(&path).map_err(|err| {
+                format!("не прочитать таблицу стилей {}: {err}", path.display())
+            })?),
+            None => None,
+        };
+        let screen = model::parse_with_sheet(&text, sheet_text.as_deref()).map_err(|errors| {
             let list: Vec<String> = errors.iter().map(|e| e.to_json()).collect();
             format!("{{\"ok\":false,\"errors\":[{}]}}", list.join(","))
         })?;
@@ -49,6 +69,7 @@ impl Project {
             icon_font: None,
             store: None,
             window_icon: None,
+            style_sheet: None,
             ui_font: None,
             window: Default::default(),
             root: vec![Widget::container(WidgetKind::Vbox)],
