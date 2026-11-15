@@ -260,6 +260,7 @@ pub fn eval(forms: &[Value]) -> Result<Evaluated, LispError> {
             rust_fields: Vec::new(),
             theme: Default::default(),
             icon_font: None,
+            store: None,
             ui_font: None,
             window: crate::model::WindowOptions::default(),
             root: vec![Widget::container(WidgetKind::Vbox)],
@@ -351,6 +352,14 @@ impl Builder {
                 })?;
                 let value = args.get(2).and_then(Value::text).unwrap_or_default();
                 self.screen.fields.push(Field { name, ty, value });
+                Ok(None)
+            }
+            "store" | "хранилище" | "state-file" => {
+                let path = args
+                    .first()
+                    .and_then(Value::text)
+                    .ok_or_else(|| LispError::new("(store \"путь.store\")", "путь к файлу строкой"))?;
+                self.screen.store = Some(path);
                 Ok(None)
             }
             "font-family" | "font_family" | "ui-font" => {
@@ -1012,6 +1021,12 @@ mod tests {
         assert_eq!(theme.panel.as_deref(), Some("#0b0f14"));
         assert_eq!(theme.font, 15.0);
         assert_eq!(theme.round, 10);
+    }
+
+    #[test]
+    fn store_form_in_sexpr() {
+        let screen = screen_of(r#"(window "Х" 320 220) (store "/tmp/s.store") (state n int 0)"#);
+        assert_eq!(screen.store.as_deref(), Some("/tmp/s.store"));
     }
 
     #[test]

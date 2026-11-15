@@ -208,6 +208,15 @@ problems: 0
   <div class="shot"><img src="dashboard.png" alt="Dashboard window: three cards in a row, a journal below, buttons in the corners"></div>
 </section>
 
+<section id="store">
+  <h2>Data between runs</h2>
+  <p class="sub">An app remembers its fields instead of only drawing them: <code>store "path"</code> reads
+    values at start and writes on every change. Writes are atomic: temp file plus rename.</p>
+  <div class="term"><span class="p">store</span> "~/.local/share/lazr/todo.store"</div>
+  <p class="sub">Verified by running: two <code>--selftest</code> runs give <code>1 → 2</code>, then
+    <code>2 → 3</code>, and the file holds <code>3</code>. <code>lazr live --check</code> reads the same file.</p>
+</section>
+
 <section id="text">
   <h2>Your own font, mono and tooltips</h2>
   <p class="sub">The text font is a model line. Monospace is switched per widget, and a tooltip lives in the same

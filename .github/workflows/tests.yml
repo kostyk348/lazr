@@ -85,6 +85,17 @@ jobs:
           cargo run -q -- headless /tmp/when-gen | tee /tmp/when-gen/out.txt
           # фон окна рисует сама программа, поэтому фигур на одну больше
           grep -q '2 фигур' /tmp/when-gen/out.txt
+      - name: состояние между запусками (два прогона)
+        run: |
+          rm -rf /tmp/store-ci && mkdir -p /tmp/store-ci
+          printf 'window "Х" 320 220\nstore "/tmp/store-ci/s.store"\nstate count int 0\nbutton "п" do count += 1\n' > /tmp/store-ci/form.lazr
+          cargo run -q -- build /tmp/store-ci
+          cargo run -q -- verify /tmp/store-ci | tee /tmp/store-ci/first.txt
+          grep -q 'count: 0 → 1' /tmp/store-ci/first.txt
+          test "$(cut -f2 /tmp/store-ci/s.store | head -1)" = "1"
+          cargo run -q -- verify /tmp/store-ci | tee /tmp/store-ci/second.txt
+          grep -q 'count: 1 → 2' /tmp/store-ci/second.txt
+          test "$(cut -f2 /tmp/store-ci/s.store | head -1)" = "2"
       - name: свой шрифт, моно и подсказки (генератор)
         run: |
           mkdir -p /tmp/font-ci

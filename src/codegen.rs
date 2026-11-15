@@ -1161,7 +1161,7 @@ use eframe::egui;
 #[allow(unused_imports)]
 use eframe::egui::NumExt;
 {helpers}{card_helpers}{theme}
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct State {{
 {state_fields}}}
 
@@ -1181,11 +1181,11 @@ impl State {{
     #[allow(unused_mut)]
     pub fn new() -> State {{
         let mut state = State::default();
-{init_block}        state
+{init_block}{store_load}        state
     }}
 }}
 
-{fns}{widgets}{actions_code}{chrome_fn}pub fn draw(state: &mut State, ui: &mut egui::Ui) {{
+{fns}{widgets}{actions_code}{store_code}{chrome_fn}pub fn draw(state: &mut State, ui: &mut egui::Ui) {{
     // eframe 0.37 отдаёт голый Ui: фон окна никто не рисует, и светлая тема
     // выглядела чёрной. Красим панель сами — цвет берём из темы.
     let background = ui.visuals().panel_fill;
@@ -1203,7 +1203,8 @@ impl eframe::App for App {{
             apply_theme(ui.ctx());
             self.themed = true;
         }}
-        draw(&mut self.state, ui);
+        {store_before}draw(&mut self.state, ui);
+        {store_after}
     }}
 }}
 
@@ -1230,6 +1231,7 @@ fn main() {{
             }}
         }}
         println!("selftest ok: {{}} действий", actions.len());
+        {store_save_selftest}
         return;
     }}
     if std::env::args().any(|arg| arg == "--headless") {{
@@ -1274,7 +1276,149 @@ fn main() {{
         viewport = viewport_code(screen),
         chrome_fn = chrome_function(screen),
         chrome_call = chrome_call(screen),
+        store_code = store_code(screen),
+        store_save_selftest = if screen.store.is_some() {
+            "        store_save(&state);\n        println!(\"состояние записано: {}\", STORE);"
+        } else {
+            ""
+        },
+        store_load = if screen.store.is_some() {
+            "        store_load(&mut state);\n"
+        } else {
+            ""
+        },
+        store_before = if screen.store.is_some() {
+            "let before = self.state.clone();\n        "
+        } else {
+            ""
+        },
+        store_after = if screen.store.is_some() {
+            "if before != self.state {\n            store_save(&self.state);\n        }"
+        } else {
+            ""
+        },
     ))
+}
+
+/// Хранилище: значения полей между запусками. Пишем атомарно (временный файл +
+/// rename), читаем молча — испорченный файл не должен ронять приложение.
+fn store_code(screen: &Screen) -> String {
+    let Some(path) = &screen.store else {
+        return String::new();
+    };
+    let path = path.replace('\\', "\\\\").replace('"', "\\\"");
+    let mut save = String::new();
+    let mut load = String::new();
+    for field in &screen.fields {
+        let name = &field.name;
+        match field.ty {
+            crate::model::FieldType::Int | crate::model::FieldType::Float => {
+                save.push_str(&format!(
+                    "    out.push_str(&format!(\"{name}\\t{{}}\\n\", state.{name}));\n"
+                ));
+                load.push_str(&format!(
+                    "                \"{name}\" => {{\n                    if let Ok(value) = value.parse::<{}>() {{\n                        state.{name} = value;\n                    }}\n                }}\n",
+                    if field.ty == crate::model::FieldType::Float {
+                        "f32"
+                    } else {
+                        "i64"
+                    }
+                ));
+            }
+            crate::model::FieldType::Bool => {
+                save.push_str(&format!(
+                    "    out.push_str(&format!(\"{name}\\t{{}}\\n\", state.{name}));\n"
+                ));
+                load.push_str(&format!(
+                    "                \"{name}\" => {{\n                    if let Ok(value) = value.parse::<bool>() {{\n                        state.{name} = value;\n                    }}\n                }}\n"
+                ));
+            }
+            crate::model::FieldType::Str => {
+                save.push_str(&format!(
+                    "    out.push_str(&format!(\"{name}\\t{{}}\\n\", escape(&state.{name})));\n"
+                ));
+                load.push_str(&format!(
+                    "                \"{name}\" => state.{name} = unescape(value),\n"
+                ));
+            }
+            crate::model::FieldType::List => {
+                save.push_str(&format!(
+                    "    out.push_str(&format!(\"{name}\\t{{}}\\n\", state.{name}.iter().map(|item| escape(item)).collect::<Vec<_>>().join(\"\\u{{1f}}\")));\n"
+                ));
+                load.push_str(&format!(
+                    "                \"{name}\" => state.{name} = value.split('\\u{{1f}}').map(unescape).filter(|item| !item.is_empty()).collect(),\n"
+                ));
+            }
+        }
+    }
+    format!(
+        r#"
+/// Файл состояния приложения.
+const STORE: &str = "{path}";
+
+/// Путь с «~» раскрывается в домашний каталог — модель не зависит от машины.
+fn store_path() -> String {{
+    match STORE.strip_prefix("~/") {{
+        Some(rest) => format!("{{}}/{{rest}}", std::env::var("HOME").unwrap_or_default()),
+        None => STORE.to_string(),
+    }}
+}}
+
+fn escape(text: &str) -> String {{
+    text.replace('\\', "\\\\").replace('\n', "\\n").replace('\t', "\\t")
+}}
+
+fn unescape(text: &str) -> String {{
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {{
+        if ch != '\\' {{
+            out.push(ch);
+            continue;
+        }}
+        match chars.next() {{
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('\\') => out.push('\\'),
+            Some(other) => out.push(other),
+            None => out.push('\\'),
+        }}
+    }}
+    out
+}}
+
+fn store_load(state: &mut State) {{
+    let Ok(text) = std::fs::read_to_string(store_path()) else {{
+        return;
+    }};
+    for line in text.lines() {{
+        let Some((name, value)) = line.split_once('\t') else {{
+            continue;
+        }};
+        match name {{
+{load}            _ => {{}}
+        }}
+    }}
+}}
+
+fn store_save(state: &State) {{
+    let mut out = String::new();
+{save}    let path = store_path();
+    if let Some(dir) = std::path::Path::new(&path).parent() {{
+        if !dir.as_os_str().is_empty() {{
+            let _ = std::fs::create_dir_all(dir);
+        }}
+    }}
+    // Пишем во временный файл и переименовываем: оборванная запись не портит данные.
+    let temp = format!("{{path}}.tmp");
+    if std::fs::write(&temp, out).is_ok() {{
+        let _ = std::fs::rename(&temp, &path);
+    }}
+}}
+"#,
+        load = load,
+        save = save
+    )
 }
 
 /// Опции окна в ViewportBuilder: рамка, размер, всегда сверху, минимум/максимум.
@@ -1415,6 +1559,38 @@ label "x""#,
         assert!(
             source.contains("titlebar(ui, \"Т\")"),
             "рамка не вызывается"
+        );
+    }
+
+    #[test]
+    fn store_emits_atomic_persistence() {
+        let screen = parse(
+            r#"window "Х" 320 220
+store "/tmp/x.store"
+state count int 0
+state name string "старт"
+state items list "a,b"
+button "п" do count += 1"#,
+        )
+        .expect("модель");
+        let source = main_rs(&screen, "h").expect("генерация");
+        assert!(source.contains("const STORE: &str = \"/tmp/x.store\";"));
+        assert!(source.contains("fn store_load"), "нет загрузки");
+        assert!(source.contains("fn store_save"), "нет сохранения");
+        assert!(
+            source.contains("store_save(&state);"),
+            "selftest не сохраняет"
+        );
+        assert!(
+            source.contains("store_load(&mut state);"),
+            "новый запуск не читает файл"
+        );
+        // атомарность: временный файл и rename
+        assert!(source.contains(".tmp") && source.contains("fs::rename"));
+        // списки пишутся разделителем, а не запятой
+        assert!(
+            source.contains("u{1f}"),
+            "список склеен не через разделитель"
         );
     }
 

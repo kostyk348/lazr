@@ -153,6 +153,8 @@ struct Model {
     icon_font: Option<String>,
     /// Свой TTF для текста интерфейса.
     ui_font: Option<String>,
+    /// Файл состояния между запусками.
+    store: Option<String>,
     theme: Theme,
     title: String,
     width: u32,
@@ -208,6 +210,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
     let mut model = Model {
         icon_font: None,
         ui_font: None,
+        store: None,
         theme: Theme::default(),
         title: "Окно".into(),
         width: 520,
@@ -322,6 +325,10 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                     _ => Value::Text(words.get(3).map(|v| unquote(v)).unwrap_or_default()),
                 };
                 model.fields.push((name, value));
+                continue;
+            }
+            "store" | "хранилище" | "state-file" => {
+                model.store = words.get(1).map(|path| unquote(path));
                 continue;
             }
             "font-family" | "font_family" | "ui-font" => {
@@ -979,6 +986,7 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
     let mut model = Model {
         icon_font: None,
         ui_font: None,
+        store: None,
         theme: Theme::default(),
         title: "Окно".into(),
         width: 520,
@@ -1043,6 +1051,10 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
                     _ => Value::Text(args.get(2).and_then(Sexp::text).unwrap_or_default()),
                 };
                 model.fields.push((name, value));
+            }
+            "store" | "хранилище" | "state-file" => {
+                model.store = args.first().and_then(Sexp::text);
+                continue;
             }
             "font-family" | "font_family" | "ui-font" => {
                 model.ui_font = args.first().and_then(Sexp::text);
@@ -1483,6 +1495,64 @@ fn apply_icon_font(ctx: &egui::Context, path: &str) {
             }],
         )),
         Err(err) => eprintln!("иконки: не прочитать {path}: {err}"),
+    }
+}
+
+/// Состояние между запусками: тот же формат, что у сгенерированного приложения.
+/// Путь с «~» раскрывается в домашний каталог.
+fn store_path(path: &str) -> String {
+    match path.strip_prefix("~/") {
+        Some(rest) => format!("{}/{}", std::env::var("HOME").unwrap_or_default(), rest),
+        None => path.to_string(),
+    }
+}
+
+fn store_load(path: &str, state: &mut HashMap<String, Value>) {
+    let Ok(text) = std::fs::read_to_string(store_path(path)) else {
+        return;
+    };
+    for line in text.lines() {
+        let Some((name, raw)) = line.split_once('\t') else {
+            continue;
+        };
+        let value = if raw == "true" || raw == "false" {
+            Value::Bool(raw == "true")
+        } else if let Ok(number) = raw.parse::<i64>() {
+            Value::Int(number)
+        } else if let Ok(number) = raw.parse::<f32>() {
+            Value::Float(number)
+        } else if raw.contains('\u{1f}') {
+            Value::List(raw.split('\u{1f}').map(str::to_string).collect())
+        } else {
+            Value::Text(raw.to_string())
+        };
+        if let Some(slot) = state.get_mut(name) {
+            *slot = value;
+        }
+    }
+}
+
+fn store_save(path: &str, state: &HashMap<String, Value>) {
+    let path = store_path(path);
+    let mut out = String::new();
+    for (name, value) in state {
+        let text = match value {
+            Value::Int(v) => v.to_string(),
+            Value::Float(v) => v.to_string(),
+            Value::Bool(v) => v.to_string(),
+            Value::Text(v) => v.clone(),
+            Value::List(items) => items.join("\u{1f}"),
+        };
+        out.push_str(&format!("{name}\t{text}\n"));
+    }
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        if !dir.as_os_str().is_empty() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+    }
+    let temp = format!("{path}.tmp");
+    if std::fs::write(&temp, out).is_ok() {
+        let _ = std::fs::rename(&temp, &path);
     }
 }
 
@@ -2049,8 +2119,18 @@ impl eframe::App for LiveApp {
             ui.add_space(6.0);
         }
         ui.separator();
+        let before = if self.model.store.is_some() {
+            Some(self.state.clone())
+        } else {
+            None
+        };
         for node in self.model.root.clone() {
             draw_node(ui, &node, &mut self.state);
+        }
+        if let (Some(before), Some(path)) = (before, self.model.store.clone()) {
+            if before != self.state {
+                store_save(&path, &self.state);
+            }
         }
     }
 }
@@ -2076,6 +2156,10 @@ fn main() {
         modified: std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
         applied_theme: None,
     };
+    // Состояние из файла — до любых проверок, чтобы --check видел прошлые значения.
+    if let Some(store) = app.model.store.clone() {
+        store_load(&store, &mut app.state);
+    }
     if std::env::args().any(|arg| arg == "--trace") {
         TRACE.store(true, Ordering::Relaxed);
     }
@@ -2127,6 +2211,10 @@ fn main() {
             }
         }
         println!("check ok: действий {actions}");
+        if let Some(store) = app.model.store.clone() {
+            store_save(&store, &app.state);
+            println!("состояние записано: {store}");
+        }
         return;
     }
     if std::env::args().any(|arg| arg == "--headless") {

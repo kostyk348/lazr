@@ -304,6 +304,15 @@ selftest ok: 2 действий
   </div>
 </section>
 
+<section id="store">
+  <h2>Данные между запусками</h2>
+  <p class="sub">Приложение помнит поля, а не только рисует их: <code>store "путь"</code> — и значения
+    читаются при старте и пишутся при каждом изменении. Запись атомарная: временный файл и rename.</p>
+  <div class="term"><span class="p">store</span> "~/.local/share/lazr/todo.store"</div>
+  <p class="sub">Проверено запуском: два <code>--selftest</code> подряд дают <code>1 → 2</code>, затем
+    <code>2 → 3</code>, в файле лежит <code>3</code>. <code>lazr live --check</code> читает тот же файл.</p>
+</section>
+
 <section id="text">
   <h2>Свой шрифт, моно и подсказки</h2>
   <p class="sub">Шрифт текста — строка модели. Моноширинность включается у одного виджета, подсказка живёт

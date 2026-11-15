@@ -187,6 +187,25 @@ lines), `font`, `spacing`, `round`. A style is data: one line in the model, zero
 What styles cannot do: lazr has no gradients, blur, shadows or textures — a style rests on palette, shape and
 rhythm, not on effects. The skill states that limitation honestly.
 
+## State between runs
+
+An app has to remember data, not just draw it. One model line and every field persists:
+
+```
+store "~/.local/share/lazr/todo.store"
+```
+
+What the generated app does:
+
+- **reads** the file at start and puts the values into the fields (no file — the model's initial values are used);
+- **writes** on every state change: after an in-window action and after `--selftest`;
+- writes **atomically** — temp file plus `rename`, so a torn write never corrupts the data;
+- expands `~` to `HOME`, so the model is not tied to one machine;
+- uses a simple portable format: `field<TAB>value`, lists joined by `\u{1f}`.
+
+Verified by running: two `--selftest` runs in a row give `count: 1 → 2`, then `count: 2 → 3`, and the file holds `3`.
+`lazr live --check` does the same: the live engine and the built app read the same file.
+
 ## Fonts, monospaced text and tooltips
 
 Interface text is configurable from the model too:

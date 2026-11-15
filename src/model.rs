@@ -511,6 +511,8 @@ pub struct Screen {
     pub theme: Theme,
     /// Внешний TTF-шрифт с иконками (Font Awesome, Material Symbols, …).
     pub icon_font: Option<String>,
+    /// Файл, в котором приложение хранит значения полей между запусками.
+    pub store: Option<String>,
     /// Свой TTF для текста интерфейса (Inter, JetBrains Mono, …).
     pub ui_font: Option<String>,
     /// Рамка, всегда сверху, минимум/максимум размера, перетаскивание.
@@ -805,6 +807,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         rust_fields: Vec::new(),
         theme: Theme::default(),
         icon_font: None,
+        store: None,
         ui_font: None,
         window: WindowOptions::default(),
         root: Vec::new(),
@@ -1061,6 +1064,15 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     });
                 }
             }
+            "store" | "хранилище" | "state-file" => match words.get(1) {
+                Some(path) => screen.store = Some(path.trim_matches('"').to_string()),
+                None => errors.push(ModelError {
+                    line: line_no,
+                    code: "STORE_NEEDS_PATH",
+                    message: "у store нет пути к файлу".into(),
+                    hint: "store \"~/.local/share/lazr/задачи.store\"".into(),
+                }),
+            },
             "font-family" | "font_family" | "шрифт" | "ui-font" => match words.get(1) {
                 Some(path) => screen.ui_font = Some(path.trim_matches('"').to_string()),
                 None => errors.push(ModelError {
@@ -1553,6 +1565,9 @@ pub fn render(screen: &Screen) -> String {
     if let Some(path) = &screen.ui_font {
         out.push_str(&format!("font-family {}\n", quote(path)));
     }
+    if let Some(path) = &screen.store {
+        out.push_str(&format!("store {}\n", quote(path)));
+    }
     for field in &screen.rust_fields {
         out.push_str(&format!(
             "rust field {} {} {}\n",
@@ -1712,6 +1727,23 @@ vbox {pad:12}
   hbox {align:center}
     text_input "Имя" -> name {grow}
 "#;
+
+    #[test]
+    fn store_survives_render() {
+        let screen = parse(
+            r#"window "Х" 320 220
+store "~/.local/share/lazr/x.store"
+state count int 0"#,
+        )
+        .expect("модель с хранилищем");
+        assert_eq!(screen.store.as_deref(), Some("~/.local/share/lazr/x.store"));
+        let text = render(&screen);
+        assert!(
+            text.contains("store \"~/.local/share/lazr/x.store\""),
+            "{text}"
+        );
+        assert_eq!(parse(&text).expect("после render").store, screen.store);
+    }
 
     #[test]
     fn ui_font_mono_and_hint() {
