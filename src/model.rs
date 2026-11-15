@@ -99,6 +99,10 @@ pub struct Style {
     pub key: Option<String>,
     /// Имя иконки из встроенного набора lazr.
     pub icon: Option<String>,
+    /// Моноширинный шрифт — для терминалов, кода и ретро-стилей.
+    pub mono: bool,
+    /// Подсказка при наведении.
+    pub hint: Option<String>,
 }
 
 impl Style {
@@ -113,6 +117,8 @@ impl Style {
             && !self.grow
             && self.key.is_none()
             && self.icon.is_none()
+            && !self.mono
+            && self.hint.is_none()
     }
     pub fn as_str(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
@@ -130,6 +136,12 @@ impl Style {
         }
         if self.bold {
             parts.push("bold".to_string());
+        }
+        if self.mono {
+            parts.push("mono".to_string());
+        }
+        if let Some(hint) = &self.hint {
+            parts.push(format!("hint:\"{hint}\""));
         }
         if let Some(pad) = self.pad {
             parts.push(format!("pad:{}", trim_float(pad)));
@@ -499,6 +511,8 @@ pub struct Screen {
     pub theme: Theme,
     /// Внешний TTF-шрифт с иконками (Font Awesome, Material Symbols, …).
     pub icon_font: Option<String>,
+    /// Свой TTF для текста интерфейса (Inter, JetBrains Mono, …).
+    pub ui_font: Option<String>,
     /// Рамка, всегда сверху, минимум/максимум размера, перетаскивание.
     pub window: WindowOptions,
     pub root: Vec<Widget>,
@@ -546,20 +560,21 @@ pub fn json_str(text: &str) -> String {
 fn tokens(line: &str) -> Vec<(String, bool)> {
     let mut out = Vec::new();
     let mut current = String::new();
+    let mut quoted_text = String::new();
     let mut quoted = false;
     let mut escaped = false;
     let mut depth = 0;
     for ch in line.chars() {
         if escaped {
             match ch {
-                'n' => current.push('\n'),
-                't' => current.push('\t'),
+                'n' => quoted_text.push('\n'),
+                't' => quoted_text.push('\t'),
                 // «\uXXXX» сохраняем целиком: его разбирает unescape()
                 'u' => {
-                    current.push('\\');
-                    current.push('u');
+                    quoted_text.push('\\');
+                    quoted_text.push('u');
                 }
-                other => current.push(other),
+                other => quoted_text.push(other),
             }
             escaped = false;
             continue;
@@ -568,11 +583,18 @@ fn tokens(line: &str) -> Vec<(String, bool)> {
             match ch {
                 '\\' => escaped = true,
                 '"' => {
-                    out.push((current.clone(), true));
-                    current.clear();
+                    // Внутри стиля кавычки — часть того же токена: {hint:"текст"}
+                    if depth > 0 {
+                        current.push('"');
+                        current.push_str(&quoted_text);
+                        current.push('"');
+                    } else {
+                        out.push((quoted_text.clone(), true));
+                    }
+                    quoted_text.clear();
                     quoted = false;
                 }
-                c => current.push(c),
+                c => quoted_text.push(c),
             }
             continue;
         }
@@ -668,9 +690,46 @@ pub fn is_style_token(token: &str) -> bool {
     if !token.starts_with('{') || !token.ends_with('}') {
         return false;
     }
+    // Стиль — это блок, где КАЖДАЯ часть либо ключ:значение из известных,
+    // либо известный флаг. Блок действия «{ count = 0 }» стилем не считается,
+    // иначе код действия уезжает в стили.
+    const KEYS: [&str; 14] = [
+        "size",
+        "кегль",
+        "color",
+        "цвет",
+        "bold",
+        "жирный",
+        "pad",
+        "padding",
+        "width",
+        "height",
+        "align",
+        "grow",
+        "key",
+        "icon",
+    ];
+    const EXTRA: [&str; 6] = ["mono", "моно", "hint", "подсказка", "center", "right"];
     let inner = &token[1..token.len() - 1];
-    let before_space = inner.split_whitespace().next().unwrap_or("");
-    before_space.contains(':')
+    let mut parts = 0;
+    for part in inner.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        parts += 1;
+        let key = part
+            .split(':')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_matches('"');
+        let known = KEYS.contains(&key) || EXTRA.contains(&key);
+        if !known {
+            return false;
+        }
+    }
+    parts > 0
 }
 
 fn parse_style(text: &str) -> Result<Style, String> {
@@ -695,6 +754,10 @@ fn parse_style(text: &str) -> Result<Style, String> {
                 )
             }
             "bold" => style.bold = true,
+            "mono" | "моно" => style.mono = true,
+            "hint" | "подсказка" => {
+                style.hint = Some(value.trim_matches('"').to_string());
+            }
             "key" => style.key = Some(value.to_string()),
             "icon" => style.icon = Some(value.to_string()),
             "pad" | "padding" => {
@@ -742,6 +805,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         rust_fields: Vec::new(),
         theme: Theme::default(),
         icon_font: None,
+        ui_font: None,
         window: WindowOptions::default(),
         root: Vec::new(),
     };
@@ -997,6 +1061,15 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     });
                 }
             }
+            "font-family" | "font_family" | "шрифт" | "ui-font" => match words.get(1) {
+                Some(path) => screen.ui_font = Some(path.trim_matches('"').to_string()),
+                None => errors.push(ModelError {
+                    line: line_no,
+                    code: "FONT_FAMILY_NEEDS_PATH",
+                    message: "у font-family нет пути к файлу".into(),
+                    hint: "font-family \"/usr/share/fonts/TTF/Inter-Regular.ttf\"".into(),
+                }),
+            },
             "icon-font" | "icon_font" => {
                 match words.get(1) {
                     Some(path) => {
@@ -1477,6 +1550,9 @@ pub fn render(screen: &Screen) -> String {
     if let Some(path) = &screen.icon_font {
         out.push_str(&format!("icon-font {}\n", quote(path)));
     }
+    if let Some(path) = &screen.ui_font {
+        out.push_str(&format!("font-family {}\n", quote(path)));
+    }
     for field in &screen.rust_fields {
         out.push_str(&format!(
             "rust field {} {} {}\n",
@@ -1636,6 +1712,40 @@ vbox {pad:12}
   hbox {align:center}
     text_input "Имя" -> name {grow}
 "#;
+
+    #[test]
+    fn ui_font_mono_and_hint() {
+        let screen = parse(
+            r#"window "Т" 420 300
+font-family "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+label "код 123" {mono, hint:"подсказка при наведении"}"#,
+        )
+        .expect("шрифт, моно и подсказка");
+        assert_eq!(
+            screen.ui_font.as_deref(),
+            Some("/usr/share/fonts/TTF/DejaVuSansMono.ttf")
+        );
+        let label = &screen.root[0];
+        assert!(label.style.mono, "моноширинный флаг потерян");
+        assert_eq!(label.style.hint.as_deref(), Some("подсказка при наведении"));
+        // и всё это переживает render → parse
+        let text = render(&screen);
+        assert!(text.contains("font-family"), "{text}");
+        assert!(text.contains("mono"), "{text}");
+        let again = parse(&text).expect("после render");
+        assert_eq!(again.ui_font, screen.ui_font);
+        assert!(again.root[0].style.mono);
+        assert_eq!(again.root[0].style.hint, label.style.hint);
+    }
+
+    #[test]
+    fn style_with_quoted_value_is_still_style() {
+        // «{hint:"текст с пробелами"}» — это стиль, а «{ count = 0 }» — код.
+        assert!(is_style_token(r#"{hint:"два слова"}"#));
+        assert!(is_style_token("{mono, size:14}"));
+        assert!(!is_style_token("{ count = 0 }"));
+        assert!(!is_style_token(r#"{ name = "a b" }"#));
+    }
 
     #[test]
     fn window_options_in_line() {

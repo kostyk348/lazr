@@ -187,6 +187,26 @@ lines), `font`, `spacing`, `round`. A style is data: one line in the model, zero
 What styles cannot do: lazr has no gradients, blur, shadows or textures — a style rests on palette, shape and
 rhythm, not on effects. The skill states that limitation honestly.
 
+## Fonts, monospaced text and tooltips
+
+Interface text is configurable from the model too:
+
+```
+font-family "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+
+label "term@lazr" {mono, hint:"hover me"}
+button "run" do runs += 1 {hint:"append the command to the log"}
+```
+
+| Key | Effect |
+|---|---|
+| `font-family "path.ttf"` | your own TTF for all text; inserted first into the proportional family, the built-in one stays as fallback (so Cyrillic never disappears) |
+| `{mono}` | monospaced text for a single widget — terminals, code, retro |
+| `{hint:"…"}` | hover tooltip on a label or a button |
+
+A tooltip is part of the style, not a separate line, so it lives in the same braces: `{mono, hint:"…"}`.
+Verified by screenshot: the "Terminal" demo is built on DejaVu Sans Mono and its command log is monospaced.
+
 ## Window: own frame and behaviour
 
 The window is configured by the same keys in two spellings — inline on the `window` line, or as separate lines:

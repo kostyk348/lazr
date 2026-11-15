@@ -57,6 +57,10 @@ struct Node {
     color: Option<String>,
     size: Option<f32>,
     bold: bool,
+    /// Моноширинный текст (терминалы, код).
+    mono: bool,
+    /// Подсказка при наведении.
+    hint: Option<String>,
     /// Абсолютная точка внутри place.
     at: Option<(f32, f32)>,
     /// Размер блока (у place — размер самого места).
@@ -147,6 +151,8 @@ impl WindowFlags {
 struct Model {
     /// Подключённый TTF с иконками.
     icon_font: Option<String>,
+    /// Свой TTF для текста интерфейса.
+    ui_font: Option<String>,
     theme: Theme,
     title: String,
     width: u32,
@@ -175,6 +181,8 @@ fn parse_style(token: &str, node: &mut Node) {
             "color" => node.color = Some(value.to_string()),
             "size" => node.size = value.parse().ok(),
             "bold" => node.bold = true,
+            "mono" | "моно" => node.mono = true,
+            "hint" | "подсказка" => node.hint = Some(value.trim_matches('"').to_string()),
             _ => {}
         }
     }
@@ -199,6 +207,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
     let mut problems: Vec<String> = Vec::new();
     let mut model = Model {
         icon_font: None,
+        ui_font: None,
         theme: Theme::default(),
         title: "Окно".into(),
         width: 520,
@@ -313,6 +322,10 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                     _ => Value::Text(words.get(3).map(|v| unquote(v)).unwrap_or_default()),
                 };
                 model.fields.push((name, value));
+                continue;
+            }
+            "font-family" | "font_family" | "ui-font" => {
+                model.ui_font = words.get(1).map(|path| unquote(path));
                 continue;
             }
             "icon-font" | "icon_font" => {
@@ -965,6 +978,7 @@ fn parse_sexpr_model(source: &str) -> (Model, Vec<String>) {
     let mut problems = Vec::new();
     let mut model = Model {
         icon_font: None,
+        ui_font: None,
         theme: Theme::default(),
         title: "Окно".into(),
         width: 520,
@@ -1206,6 +1220,8 @@ fn build_node(
                     "bind" => node.bind = value.and_then(|v| v.text()),
                     "size" => node.size = value.and_then(|v| v.num()).map(|v| v as f32),
                     "bold" => node.bold = true,
+                    "mono" => node.mono = true,
+                    "hint" => node.hint = value.and_then(|v| v.text()),
                     "color" => node.color = value.and_then(|v| v.text()),
                     "at" => {
                         if let (Some(x), Some(y)) = (
@@ -1466,6 +1482,21 @@ fn apply_icon_font(ctx: &egui::Context, path: &str) {
     }
 }
 
+fn apply_ui_font(ctx: &egui::Context, path: &str) {
+    // Свой шрифт текста — первым в proportional, встроенный остаётся запасным.
+    match std::fs::read(path) {
+        Ok(bytes) => ctx.add_font(egui::FontInsert::new(
+            "ui",
+            egui::FontData::from_owned(bytes),
+            vec![egui::InsertFontFamily {
+                family: egui::FontFamily::Proportional,
+                priority: egui::FontPriority::Highest,
+            }],
+        )),
+        Err(err) => eprintln!("шрифт: не прочитать {path}: {err}"),
+    }
+}
+
 fn apply_theme(ctx: &egui::Context, theme: &Theme) {
     ctx.set_theme(if theme.dark {
         egui::ThemePreference::Dark
@@ -1535,6 +1566,9 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
         if node.bold {
             out = out.strong();
         }
+        if node.mono {
+            out = out.monospace();
+        }
         if let Some(color) = &node.color {
             out = out.color(hex_color(color));
         }
@@ -1542,10 +1576,17 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
     };
     match node.kind.as_str() {
         "label" => {
-            ui.label(rich(text_with(state, &node.text)));
+            let response = ui.label(rich(text_with(state, &node.text)));
+            if let Some(hint) = &node.hint {
+                response.on_hover_text(hint);
+            }
         }
         "button" => {
-            if ui.button(rich(text_with(state, &node.text))).clicked() {
+            let label = ui.button(rich(text_with(state, &node.text)));
+            if let Some(hint) = &node.hint {
+                label.clone().on_hover_text(hint);
+            }
+            if label.clicked() {
                 let before = state.clone();
                 if let Some(handler) = &node.handler {
                     eval_handler(state, handler);
@@ -1840,6 +1881,7 @@ struct LiveApp {
     modified: Option<SystemTime>,
     applied_theme: Option<Theme>,
     applied_icon_font: Option<String>,
+    applied_ui_font: Option<String>,
 }
 
 impl LiveApp {
@@ -1932,6 +1974,12 @@ impl eframe::App for LiveApp {
             apply_theme(ui.ctx(), &wanted);
             self.applied_theme = Some(wanted);
         }
+        if self.applied_ui_font.as_ref() != self.model.ui_font.as_ref() {
+            if let Some(path) = self.model.ui_font.clone() {
+                apply_ui_font(ui.ctx(), &path);
+            }
+            self.applied_ui_font = self.model.ui_font.clone();
+        }
         // шрифт иконок ставим один раз на путь
         if self.applied_icon_font.as_ref() != self.model.icon_font.as_ref() {
             if let Some(path) = self.model.icon_font.clone() {
@@ -2016,6 +2064,7 @@ fn main() {
     let title = model.title.clone();
     let mut app = LiveApp {
         applied_icon_font: None,
+        applied_ui_font: None,
         path: path.clone(),
         model,
         problems,

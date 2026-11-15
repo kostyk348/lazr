@@ -260,6 +260,7 @@ pub fn eval(forms: &[Value]) -> Result<Evaluated, LispError> {
             rust_fields: Vec::new(),
             theme: Default::default(),
             icon_font: None,
+            ui_font: None,
             window: crate::model::WindowOptions::default(),
             root: vec![Widget::container(WidgetKind::Vbox)],
         },
@@ -350,6 +351,13 @@ impl Builder {
                 })?;
                 let value = args.get(2).and_then(Value::text).unwrap_or_default();
                 self.screen.fields.push(Field { name, ty, value });
+                Ok(None)
+            }
+            "font-family" | "font_family" | "ui-font" => {
+                let path = args.first().and_then(Value::text).ok_or_else(|| {
+                    LispError::new("(font-family \"путь.ttf\")", "путь к TTF строкой")
+                })?;
+                self.screen.ui_font = Some(path);
                 Ok(None)
             }
             "icon-font" | "icon_font" => {
@@ -789,6 +797,12 @@ impl Builder {
             }
             "size" => style.size = value.num().map(|v| v as f32),
             "bold" => style.bold = matches!(value, Value::Bool(true)),
+            // :mono может прийти и флагом, и значением; голое слово — это «да»
+            "mono" => {
+                style.mono = !matches!(value, Value::Bool(false))
+                    && !matches!(value.text().as_deref(), Some("no" | "false" | "нет"));
+            }
+            "hint" => style.hint = value.text(),
             "key" => style.key = value.text(),
             "icon" => style.icon = value.text(),
             "color" => style.color = value.text(),
@@ -998,6 +1012,21 @@ mod tests {
         assert_eq!(theme.panel.as_deref(), Some("#0b0f14"));
         assert_eq!(theme.font, 15.0);
         assert_eq!(theme.round, 10);
+    }
+
+    #[test]
+    fn font_family_mono_and_hint_in_sexpr() {
+        let screen = screen_of(
+            r#"(window "Т" 420 300) (font-family "/usr/share/fonts/TTF/DejaVuSansMono.ttf")
+(vbox (label "код" :mono true :hint "подсказка"))"#,
+        );
+        assert_eq!(
+            screen.ui_font.as_deref(),
+            Some("/usr/share/fonts/TTF/DejaVuSansMono.ttf")
+        );
+        let label = &screen.root[0].children[0];
+        assert!(label.style.mono);
+        assert_eq!(label.style.hint.as_deref(), Some("подсказка"));
     }
 
     #[test]

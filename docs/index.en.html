@@ -208,6 +208,16 @@ problems: 0
   <div class="shot"><img src="dashboard.png" alt="Dashboard window: three cards in a row, a journal below, buttons in the corners"></div>
 </section>
 
+<section id="text">
+  <h2>Your own font, mono and tooltips</h2>
+  <p class="sub">The text font is a model line. Monospace is switched per widget, and a tooltip lives in the same
+    style block as size and colour.</p>
+  <div class="term"><span class="p">font-family</span> "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+<span class="p">label</span> "term@lazr" {mono, hint:"hover me"}</div>
+  <p class="sub">The built-in font stays as a fallback, so Cyrillic and rare glyphs never turn into boxes.
+    The "Terminal" demo is built exactly like this — and its log really is monospaced.</p>
+</section>
+
 <section id="window">
   <h2>Your own window frame</h2>
   <p class="sub">The window is part of the model. The system frame can be switched off, and then the app draws

@@ -638,6 +638,7 @@ mod tests {
             rust_fields: Vec::new(),
             theme: crate::model::Theme::default(),
             icon_font: None,
+            ui_font: None,
             window: crate::model::WindowOptions::default(),
             root: Vec::new(),
         };

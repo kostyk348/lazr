@@ -476,6 +476,7 @@ fn apply_theme(ctx: &egui::Context) {{
         style.spacing.interact_size.y = font * 1.9;
     }});
     {{icon_font_call}}
+    {{ui_font_call}}
 }}
 "#,
         if theme.dark { "Dark" } else { "Light" },
@@ -487,10 +488,46 @@ fn apply_theme(ctx: &egui::Context) {{
         card = card,
         muted = muted,
     );
-    format!(
-        "{icon_font}{}",
-        with_icon_font(code, screen.icon_font.is_some())
-    )
+    let code = with_icon_font(code, screen.icon_font.is_some());
+    let code = with_ui_font(code, screen.ui_font.is_some());
+    format!("{icon_font}{}{code}", ui_font_code(screen))
+}
+
+/// Функция подключения своего шрифта текста.
+fn ui_font_code(screen: &Screen) -> String {
+    match &screen.ui_font {
+        Some(path) => format!(
+            r#"
+/// Свой шрифт текста (модель: font-family "{path}").
+fn apply_ui_font(ctx: &egui::Context) {{
+    // Ставим первым в proportional: встроенный шрифт остаётся запасным,
+    // поэтому кириллица и недостающие глифы не превращаются в квадраты.
+    let path = "{path}";
+    match std::fs::read(path) {{
+        Ok(bytes) => ctx.add_font(egui::FontInsert::new(
+            "ui",
+            egui::FontData::from_owned(bytes),
+            vec![egui::InsertFontFamily {{
+                family: egui::FontFamily::Proportional,
+                priority: egui::FontPriority::Highest,
+            }}],
+        )),
+        Err(err) => eprintln!("шрифт: не прочитать {{path}}: {{err}}"),
+    }}
+}}
+"#,
+            path = path.replace('\\', "\\\\").replace('"', "\\\"")
+        ),
+        None => String::new(),
+    }
+}
+
+fn with_ui_font(code: String, has_font: bool) -> String {
+    if has_font {
+        code.replace("{ui_font_call}", "apply_ui_font(ctx);")
+    } else {
+        code.replace("{ui_font_call}", "")
+    }
 }
 
 fn with_icon_font(code: String, has_font: bool) -> String {
@@ -589,6 +626,9 @@ fn styled_text(text_code: &str, widget: &Widget) -> String {
     if widget.style.bold {
         builder.push_str(".strong()");
     }
+    if widget.style.mono {
+        builder.push_str(".monospace()");
+    }
     if let Some(color) = &widget.style.color {
         if let Some(code) = color_code(color) {
             builder.push_str(&format!(".color({code})"));
@@ -679,7 +719,11 @@ fn emit_widget(
     match &widget.kind {
         WidgetKind::Label => {
             let text = styled_text(&text_expr_row(&widget.text, screen, emit.row), widget);
-            out.push_str(&format!("{pad}ui.label({text});\n"));
+            let hint = match &widget.style.hint {
+                Some(tip) => format!(".on_hover_text({})", rust_string(tip)),
+                None => String::new(),
+            };
+            out.push_str(&format!("{pad}ui.label({text}){hint};\n"));
         }
         WidgetKind::Button => {
             // Компактная кнопка-иконка: подписи нет, глиф из подключённого шрифта.
@@ -734,8 +778,12 @@ fn emit_widget(
                         rust_string(key)
                     ));
                 }
+                let hint = match &widget.style.hint {
+                    Some(tip) => format!(".on_hover_text({})", rust_string(tip)),
+                    None => String::new(),
+                };
                 out.push_str(&format!(
-                    "{pad}if ui.button({text}).clicked() {{\n{pad}    {action}(state);\n{pad}}}\n"
+                    "{pad}if ui.button({text}){hint}.clicked() {{\n{pad}    {action}(state);\n{pad}}}\n"
                 ));
             } else {
                 if let Some(key) = &widget.style.key {
@@ -1368,6 +1416,27 @@ label "x""#,
             source.contains("titlebar(ui, \"Т\")"),
             "рамка не вызывается"
         );
+    }
+
+    #[test]
+    fn ui_font_and_mono_and_hint_reach_the_code() {
+        let screen = parse(
+            r#"window "Т" 420 300
+font-family "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+label "код" {mono, hint:"подсказка"}"#,
+        )
+        .expect("шрифт и стиль");
+        let source = main_rs(&screen, "t").expect("генерация");
+        assert!(
+            source.contains("fn apply_ui_font"),
+            "нет своего шрифта текста"
+        );
+        assert!(
+            source.contains("apply_ui_font(ctx);"),
+            "шрифт не применяется"
+        );
+        assert!(source.contains(".monospace()"), "нет моноширинного текста");
+        assert!(source.contains(".on_hover_text("), "нет подсказки");
     }
 
     #[test]
