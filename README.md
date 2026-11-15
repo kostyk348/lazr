@@ -149,6 +149,9 @@ else
   <img src="docs/gate.png" alt="Доступ: панель по условию" width="360">
   <img src="docs/thermostat.png" alt="Термостат: пороги и ветка else" width="360">
 </p>
+<p align="center">
+  <img src="docs/checklist.png" alt="Чек-лист: шаблон строки списка" width="420">
+</p>
 
 ## Списки и шаблон строки
 

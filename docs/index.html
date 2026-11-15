@@ -73,6 +73,7 @@
   .nums td:last-child{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
   .nums tr:last-child td{border-bottom:none}
   .shots{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+  .shots figure:first-child{grid-row:span 1}
   .shots figure{margin:0}
   .shots img{width:100%;border:1px solid var(--line);border-radius:14px;display:block}
   .shots figcaption{color:var(--muted);font-size:13px;padding-top:8px}
@@ -327,6 +328,7 @@ selftest ok: 2 действий
   <div class="shots">
     <figure><img src="gate.png" alt="Доступ: панель по условию"><figcaption>Доступ — сравнение строк и панели по условию</figcaption></figure>
     <figure><img src="thermostat.png" alt="Термостат: пороги и ветка else"><figcaption>Термостат — числа, пороги и <code>when … else</code></figcaption></figure>
+    <figure><img src="checklist.png" alt="Чек-лист: шаблон строки списка"><figcaption>Чек-лист — шаблон строки: <code>{item}</code> и своя кнопка</figcaption></figure>
   </div>
 </section>
 

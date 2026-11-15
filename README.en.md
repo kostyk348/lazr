@@ -148,6 +148,9 @@ Model → live application. Every demo is machine-checked: `--problems` = 0, `ve
   <img src="docs/gate.png" alt="Access: a panel gated by a condition" width="360">
   <img src="docs/thermostat.png" alt="Thermostat: thresholds and the else branch" width="360">
 </p>
+<p align="center">
+  <img src="docs/checklist.png" alt="Checklist: a list row template" width="420">
+</p>
 
 ## Lists and row templates
 
