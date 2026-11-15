@@ -175,6 +175,17 @@ jobs:
           cargo run -q -- live examples/todo.lisp --check | tee /tmp/ci-todo-live.txt
           grep -q 'items: 0 → 1' /tmp/ci-todo-live.txt
           grep -q 'items: 1 → 0' /tmp/ci-todo-live.txt
+      - name: каждая модель .lisp конвертируется и собирается
+        run: |
+          for model in examples/*.lisp; do
+            name=$(basename "$model" .lisp)
+            dir=/tmp/lisp-$name
+            rm -rf "$dir" && mkdir -p "$dir"
+            cp "$model" "$dir/form.lisp"
+            cargo run -q -- lisp "$dir/form.lisp" --to "$dir/app"
+            cargo run -q -- build "$dir/app"
+            cargo run -q -- verify "$dir/app" | tail -1
+          done
       - name: каждая модель .lazr собирается и проходит verify
         run: |
           for model in examples/*.lazr; do
