@@ -648,8 +648,29 @@ fn emit_widget(
             // Условие компилируется тем же языком, что и обработчики: типы проверяются.
             let condition = expr::compile_condition(screen, &widget.text)
                 .map_err(|err| format!("when: {} ({})", err.message, err.hint))?;
-            let body = emit_widgets(&widget.children, screen, depth + 1, emit)?;
-            out.push_str(&format!("{pad}if {condition} {{\n{body}{pad}}}\n"));
+            // Ребёнок else — не виджет, а вторая ветка.
+            let mut then_part: Vec<Widget> = Vec::new();
+            let mut else_part: Option<&Widget> = None;
+            for child in &widget.children {
+                if child.kind == WidgetKind::Else {
+                    else_part = Some(child);
+                } else {
+                    then_part.push(child.clone());
+                }
+            }
+            let body = emit_widgets(&then_part, screen, depth + 1, emit)?;
+            let else_code = match else_part {
+                Some(branch) => {
+                    let else_body = emit_widgets(&branch.children, screen, depth + 1, emit)?;
+                    format!(" else {{\n{else_body}{pad}}}\n")
+                }
+                None => "\n".to_string(),
+            };
+            out.push_str(&format!("{pad}if {condition} {{\n{body}{pad}}}{else_code}"));
+        }
+        // Ветка else рисуется только внутри when; сама по себе — ошибка модели.
+        WidgetKind::Else => {
+            return Err("«else» без when: ветка должна идти сразу после when".to_string());
         }
         WidgetKind::Hbox => {
             let body = emit_widgets(&widget.children, screen, depth + 1, emit)?;
@@ -1102,5 +1123,16 @@ checkbox "Согласен" -> agree
             crate::model::parse("state value int 5\nwhen value > 2\n  label \"видно\"\n").unwrap();
         let code = main_rs(&screen, "app").unwrap();
         assert!(code.contains("if state.value > 2 {"), "{code}");
+    }
+
+    #[test]
+    fn else_becomes_rust_else() {
+        let screen = crate::model::parse(
+            "state n int 1\nwhen n > 2\n  label \"да\"\nelse\n  label \"нет\"\n",
+        )
+        .unwrap();
+        let code = main_rs(&screen, "app").unwrap();
+        assert!(code.contains("if state.n > 2 {"), "{code}");
+        assert!(code.contains("} else {"), "{code}");
     }
 }

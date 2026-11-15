@@ -5,7 +5,7 @@
 <h1 align="center">lazr</h1>
 
 <p align="center">
-  RAD for Rust that is friendly to AI: screen model → real egui/eframe code → build → verification by running.<br>
+  <b>A UI in 3 ms.</b> A screen model → real egui/eframe code → build → verification by running.<br>
   The model is written as line forms <em>or</em> S-expressions. Rust stays the HAL: window, memory, pixels.
 </p>
 
@@ -14,225 +14,139 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kostyk348/lazr/actions"><img src="https://github.com/kostyk348/lazr/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
-  <a href="https://kostyk348.github.io/lazr/"><img src="https://img.shields.io/badge/site-lazr-ffb86b" alt="pages"></a>
+  <a href="https://github.com/kostyk348/lazr/actions"><img src="https://github.com/kostyk348/lazr/actions/workflows/tests.yml/badge.svg" alt="CI"></a>
+  <a href="https://kostyk348.github.io/lazr/index.en.html"><img src="https://img.shields.io/badge/site-lazr-ffb86b" alt="site"></a>
+  <img src="https://img.shields.io/badge/tests-51%20green-39d353" alt="51 tests">
+  <img src="https://img.shields.io/badge/dependencies-0%20in%20the%20tool-388bfd" alt="0 dependencies">
+  <img src="https://img.shields.io/badge/demos-16%20models-ffb86b" alt="16 demos">
+  <img src="https://img.shields.io/badge/license-MIT-8b949e" alt="MIT">
+</p>
+
+<p align="center">
+  <img src="docs/paint.png" alt="Paint — a whole application described by a model" width="760">
 </p>
 
 ---
 
-## Why
+## Why it exists
 
-Lazarus gives a human a canvas: drag a button, double-click it, write a handler. An agent needs no canvas — it
-needs a **semantic** way to change the interface and a **verifiable** result. `lazr` does exactly that:
+Lazarus gives a human a canvas: drag a button, double-click, write a handler. **An agent does not need a
+canvas** — it needs a semantic way to change the interface and a verifiable result. `lazr` is Lazarus for AI:
 
 ```
-screen model (form.lazr / *.lisp)  →  a real egui/eframe project  →  cargo build  →  verify
+screen model (form.lazr / *.lisp)  →  real egui/eframe project  →  cargo build  →  verify
 ```
 
-No mouse dragging, no "generate main.rs for me". Every edit is a named operation on the model; every error is
-data with a line number, a code and a hint. Generation is deterministic: one model — one and the same text, so
-the generated code lives in git and diffs cleanly.
+- **One edit — one fact.** `lazr add DIR button "Plus" --do "count += 1"` changes a model, not an 800-line file.
+  Errors arrive as data: line, code, hint.
+- **Types are checked before the build.** `append n 1` on an `int` field is the message "«n» is not a list, it is
+  int" — not a panic a minute later.
+- **Deterministic generation.** One model — one and the same text, so the generated code lives in git and diffs
+  cleanly.
+- **Verification by running.** `verify` builds the project, renders a headless frame and calls every action,
+  printing the effect: `items: [] → ["milk"], done: 0 → 1`.
+- **Live mode.** `lazr live FILE` executes the model right now: edit the file, the window follows — no rebuild.
+
+## Speed (measured on this machine)
+
+| Step | Time |
+|---|---|
+| model → code (`lazr lisp`) | **3 ms** |
+| code → built app (warm cache) | **751 ms** |
+| edit the model → rebuild | **410 ms** |
+| check the actions (`live --check`) | **89 ms** |
+| the whole lazr test suite | **18 ms** |
+| very first egui build (empty target) | 17 s |
+
+So the loop is: **edit the model, see the result half a second later** — not "restart the IDE and wait".
+
+## Ten minutes to an app
 
 ```bash
-lazr new counter --title "Counter" --size 420x260
-lazr state counter count int 0
-lazr add counter label "Clicks: {count}"
-lazr add counter button "Plus" --do "count += 1" --style "icon:play, key:ctrl+plus"
-lazr verify counter        # build + a frame without a window + run every action
-lazr mcp                   # the same for an agent, over MCP
-```
+git clone https://github.com/kostyk348/lazr && cd lazr
+cargo install --path .
 
-## What the model can do
+# 1. live model: edit the file, the window follows
+lazr live examples/todo.lisp
 
-| What | Line form | S-expression |
-|---|---|---|
-| window | `window "Paint" 900x720` | `(window "Paint" 900 720)` |
-| fields | `state size float 4` | `(state size float 4)` |
-| text / buttons | `label "x" {size:22, bold}` | `(label "x" :size 22 :bold true)` |
-| action | `button "Plus" do count += 1` | `(button "Plus" (set! count (+ count 1)))` |
-| condition | `do if count >= 9 { count = 0 } else { count += 1 }` | `(if (>= count 9) (set! count 0) (set! count (+ count 1)))` |
-| layout | `vbox`, `hbox`, `grid 2`, `scroll`, `space 12` | `(vbox …)`, `(grid 2 …)` |
-| absolute | `place 800x480` + `at 16 50 size 240x170` | `(place 800 480 (vbox :at 16 50 :box 240 170 …))` |
-| anchors | `anchor right bottom at 16 16` | `:anchor "right bottom"` |
-| theme | `theme dark accent:#388bfd font:15 spacing:10 round:8` | `(theme dark :accent "#388bfd" :font 15)` |
-| style | `{size:22, bold, color:#e5484d, pad:12, align:center, grow}` | `:size 22 :color "#e5484d" :pad 12` |
-| icon | `{icon:save}` | `:icon "save"` |
-| shortcut | `{key:ctrl+s}` | `:key "ctrl+s"` |
-| custom widget | `rust widget badge { … }` + `custom badge` | `(rust-widget badge """…""")` + `(custom badge)` |
-| custom field | `rust field strokes Vec<Stroke> Vec::new()` | `(rust-field strokes "Vec<Stroke>" "Vec::new()")` |
-| custom function | `rust fn parse_hex { … }` | `(rust-fn parse_hex """…""")` |
-| startup code | `rust init { … }` | `(rust-init """…""")` |
+# 2. model → real project, then launch it
+lazr lisp examples/paint.lisp --to /tmp/paint
+lazr run /tmp/paint
 
-Model widgets: `label`, `button`, `checkbox`, `text_input`, `slider`, `separator`, `space`, `vbox`, `hbox`,
-`grid`, `scroll`, `place`, `custom`. Icons are a built-in set of safe names (`save`, `open`, `undo`, `pencil`,
-`brush`, `play`, `check`, `close`, …) with no external dependencies: glyphs come from egui's bundled fonts.
-
-Actions: `field += N`, `field -= N`, `field = N`, `bool = !bool`, `string = "text"`, plus `if` with arithmetic
-and comparisons. Bindings: `checkbox -> bool`, `text_input -> string`, `slider -> number`; types are checked
-before compilation.
-
-Why this is AI-friendly:
-
-* **text instead of pixels** — the model diffs in git, and the diff shows what the agent did;
-* **an error is data**: `{"line":3,"code":"UNKNOWN_WIDGET","message":"…","hint":"available: …"}`;
-* **types are checked before compilation**: `text_input -> count` is rejected at once, not after three minutes of `cargo`;
-* **deterministic generation**: one model — the same code;
-* **verification without a screen**: `--headless` runs an egui frame, `--selftest` calls every action;
-* **zero dependencies for the tool itself**: `lazr` is plain-stdlib Rust; the generated app needs only `egui`/`eframe`.
-
-## Layout: like a form, not by eye
-
-`place` is a fixed-size area where coordinates are absolute, and `anchor` measures them from the right/bottom
-edge. This was the missing piece: dashboards, canvases and panels are now placed with numbers.
-
-```lisp
-(place 800 480
-  (label "Dashboard" at 16 10 size 200x28 :size 22 :bold true)
-  (vbox :box 240 170 :at 16 50 (custom card))
-  (button "Recount" at 16 436 size 160x32 :icon "refresh" :key "ctrl+r")
-  (button "Clear" anchor right bottom at 16 16 size 130x32 :icon "delete"))
-```
-
-The theme is one line per model: dark/light base, accent, font size, spacing, corner radius. It compiles into
-`fn apply_theme(ctx)` and is applied both in the window and in the headless frame — so the theme is verified,
-not just declared.
-
-![Dashboard](docs/dashboard.png)
-
-## Packaging
-
-```console
-$ lazr package /tmp/paint --release
-binary: /tmp/paint/dist/kraski
-icon:   /tmp/paint/dist/icon.png
-entry:  /tmp/paint/dist/kraski.desktop
-archive:/tmp/paint/dist/kraski-release.tar.gz
-```
-
-The package name comes from the model title, transliterated when it is Cyrillic (`Краски` → `kraski`) instead of
-becoming a faceless `app`. `dist/` gets the binary, `icon.png` (rendered from `docs/logo.svg` via
-`rsvg-convert`), a `.desktop` entry with `Name` from the model and a tar.gz. There is no installer and no
-signature — an honest boundary, not a forgotten checkbox.
-
-## Verification — three facts, not a promise
-
-```console
-$ lazr run /tmp/paint       # build and launch in one command
+# 3. prove it works: build + frame + every action
 lazr verify /tmp/paint
-build: ok
-headless ok: 53 shapes, 18 widgets in the model
-  action "Plus": ok
-  action "Reset": ok
-selftest ok: 2 actions
-result: verified
+
+# 4. for an agent — the same over MCP
+hermes mcp add lazr --command lazr --args mcp
 ```
 
-`verify` = compilation + one frame without a window + a call to **every** button action. Custom widgets are
-covered by the frame: their code runs inside `headless`, so a panic shows up immediately.
+## Who it is for
 
-## Demo: Paint
+- **Agents and their operators** — when the interface must be edited by commands and verified without a human.
+- **Rust GUI developers** tired of `ui.horizontal(|ui| { … })` for every row of layout.
+- **People building internal tools**: dashboards, forms, panels, "an admin page in one evening".
+- **People who refuse extra installs**: the tool is a single binary with zero dependencies.
 
-A full Paint, described entirely by the model: eight tools (pencil, brush, eraser, line, rectangle, ellipse,
-text, fill), a palette, thickness, undo (Ctrl+Z), save and open, shortcuts 1–8.
+## What already works
 
-The fill is not "paint everything": the canvas is a raster, walls are built from every stroke, and a
-breadth-first walk paints only the area inside a closed contour. The file is PPM; its path sits in the "файл"
-row and can be edited, `F5` writes it and `F6` reads it back. `Ctrl+S` and `Ctrl+O` (also `F7`) raise the system
-`zenity` dialog — a convenience, not the only way.
+| | |
+|---|---|
+| Layout | `vbox`, `hbox`, `grid N`, `scroll`, `space`, `place` with absolute points, sizes and anchors |
+| Style | size, weight, colour, padding, alignment, stretch; theme in one line (dark/light, accent, font, radius) |
+| Widgets | `label`, `button`, `checkbox`, `text_input`, `slider`, `separator`, `space`, `list`, `custom` |
+| State | `int`, `float`, `bool`, `string`, `list` (a list of strings with delete) |
+| Logic | `if/else`, comparisons (strings included), arithmetic, `append/remove/clear`, `when … else` in layout |
+| Verification | `verify`, `live --check`, `--problems`, `--trace`, two adversarial GUI scripts |
+| Packaging | `lazr package` → binary + icon rendered from the logo + `.desktop` + `tar.gz` |
+| For agents | an MCP server inside: 8 tools, `lazr mcp` |
 
-Verification is a script, not an eyeball: `scripts/check-paint.py`:
+## One model, two syntaxes
 
-```console
-$ python3 scripts/check-paint.py
-canvas in the window: 11,190
-inside (27, 31, 36) · outside (255, 255, 255) → fill OK
-saved: /tmp/paint.ppm · 1053375 bytes · 836x420 → OK
-cleared True · reading restored the picture True → round-trip OK
-open dialog: raised
+Line forms suit point edits by a human and the CLI; S-expressions suit a program building the model: one form is
+one operation, no quoting or ordering traps, and a handler is a form that can be evaluated.
 
-RESULT:
-  contour fill: works
-  writing a file: works
-  reading a file (round-trip): works
-  system open dialog: works
-```
+<table>
+<tr><th>form.lazr</th><th>form.lisp</th></tr>
+<tr><td><pre>
+window "Counter" 420x260
+state count int 0
+label "Clicks: {count}" {size:22, bold}
+button "Plus" do count += 1 {icon:play}
+when count >= 3
+  label "three already" {size:12, color:#39d353}
+else
+  label "not yet" {size:12, color:#8b949e}
+</pre></td><td><pre>
+(window "Counter" 420 260)
+(state count int 0)
+(label "Clicks: {count}" :size 22 :bold true)
+(button "Plus" (set! count (+ count 1)) :icon "play")
+(when (>= count 3)
+  (label "three already" :size 12 :color "#39d353")
+  (else (label "not yet" :size 12 :color "#8b949e")))
+</pre></td></tr>
+</table>
 
-The adversarial run `scripts/adversarial-paint.py` (attacks on the controls): undo on an empty history, undo
-after undo, clear, 12 rapid clicks, resize — every attack `works`, no panics.
+## Demos
 
-![Paint](docs/paint.png)
+Model → live application. Every demo is machine-checked: `--problems` = 0, `verify` = build + frame + actions.
 
-The source is `examples/paint.lisp`: about 300 lines, of which ~250 are the canvas Rust code inside
-`rust-item`; the rest is DSL forms.
+| File | What it shows |
+|---|---|
+| `paint.lisp` | Paint: 8 tools, palette, undo, contour fill, files and system dialogs |
+| `dashboard.lisp` | Dashboard: absolute `place` layout, anchors, theme, cards |
+| `todo.lisp` / `.lazr` | Tasks: a list of strings, `append`/`remove`/`clear`, text input, counters |
+| `gate.lisp` / `.lazr` | Access: string comparison and conditionally shown panels |
+| `thermostat.lisp` | Thermostat: numbers, thresholds and `when … else` |
+| `calc.lisp` | Budget: arithmetic in handlers (`*`, `/`), step slider |
+| `settings.lisp` | Settings: light theme, checkbox, slider, text input, `do` with two assignments |
+| `quiz.lisp` | Quiz: two counters, several actions in one button |
+| `live-demo.lisp` / `.lazr` | Runtime showcase: edit the file, the window follows |
 
-```lisp
-(window "Paint" 900 720)
-(state tool string "brush")
-(state size float 4)
-(rust-field strokes "Vec<Stroke>" "Vec::new()")
-(vbox :pad 12
-  (hbox (label "Paint" :size 20 :bold true) (custom toolbar))
-  (custom palette)
-  (hbox (custom actions) (slider "thickness" :bind size :range (1 40)))
-  (custom canvas)
-  (custom status))
-```
-
-## `lazr live` — the model is read while the app runs
-
-```console
-$ lazr live examples/live-demo.lazr
-```
-
-One runtime is built (a template, not generated per screen); it is then launched with the path to a model and
-re-reads the file whenever it changes: edit the model, the window changes, no rebuild. This is the first step
-towards "Rust is the HAL, everything else is a DSL".
-
-Supported today: window, states, `label`, `button`, `checkbox`, `text_input`, `slider`, `space`, `separator`,
-`vbox`, `hbox`, `grid`, `scroll`, `{size, bold, color}` styles, `{field}` interpolation.
-
-The runtime **executes S-expressions directly** — no conversion to the line model, no supervisor thread: a
-handler is kept as a form and evaluated, not restated as a string (`(button "Plus" (set! count (+ count 1)))`).
-It understands `set!`, `if` with `> < >= <= == !=`, `do` and arithmetic over fields; raw strings `"""…"""` (where
-generator Rust lives) are skipped. The line model works too — the syntax is detected from the first meaningful
-line of the file.
-
-Clicks can be traced: `lazr live FILE --trace` prints every handler application —
-
-```
-click "Plus": count: 0 → 1
-click "Plus": count: 1 → 2
-```
-
-The runtime also understands what used to be generator-only: `place` with absolute `at X Y` points, `size WxH`
-boxes and `anchor right bottom`; the `theme` line (dark/light base, accent, font, spacing, radius); arithmetic in
-actions — `count = count + limit`, `limit = limit * 2`, `count -= count - 1`. Blocks `rust widget/fn/init` are
-skipped: that is generator code, not the model.
-
-Verification without a window and without eyeballs:
-
-```console
-$ lazr live examples/live-demo.lazr --check
-  "Plus": count: 0 → 1
-  "Minus": count: 1 → 0
-  "Reset": no changes (count = 0)
-check ok: 3 actions
-```
-
-`--check` applies every action in the model to the state and prints which fields changed — it verifies the
-effect of the handlers the same way `lazr verify` verifies a generated app. In the window it is verified
-separately: three clicks on "Plus" give "Clicks: 3 of 5", and an external edit changes the window without a
-rebuild.
-
-A broken model does not kill the window: the runtime shows a red panel with the findings ("line 5: widget
-"frobnicator" is unknown to the runtime", "field "missing" is not declared in state"), and `--problems` prints them
-machine-readably and exits with code 1 — CI checks that.
-
-You can edit `.lisp` too: `lazr live model.lisp` keeps the converted model up to date, so S-expression edits are
-picked up without a rebuild (verified: changing the heading in `.lisp` changes the window).
-
-What the runtime does not have yet: `custom` widgets and `place` (they need code generation), and complex action
-expressions — the runtime understands assignment, `+=`/`-=`, `!bool`, strings and a single-branch `if`.
+<p align="center">
+  <img src="docs/gate.png" alt="Access: a panel gated by a condition" width="360">
+  <img src="docs/thermostat.png" alt="Thermostat: thresholds and the else branch" width="360">
+</p>
 
 ## Lists
 
@@ -252,8 +166,8 @@ panic.
 
 ## Conditions
 
-`when` is a container: its children are drawn only when the condition holds. The condition is compiled by the
-same language as handlers, so type errors surface before the build.
+`when` is a container: children are drawn only while the condition holds; `else` is the other branch. The
+condition is compiled by the same language as handlers, so type errors surface before the build.
 
 ```lisp
 (when (>= score 3) (label "great" :color "#39d353"))
@@ -261,34 +175,89 @@ same language as handlers, so type errors surface before the build.
 (when agree (label "consent given"))
 ```
 
-The line model says the same, with the condition after the name:
-
 ```
-when tries >= 3
-  label "hint: 42"
+when temp >= limit
+  label "hot" {size:22, color:#e5484d}
+else
+  label "normal" {size:22, color:#39d353}
 ```
 
 Comparisons: `> < >= <= == !=`, strings included (`code == "42"`), and a bare boolean field (`when agree`).
 
-## Demos
+## Verification — three facts, not a promise
 
-All of them live in `examples/` and all are machine-checked (`lazr live <file> --problems` → 0, `--check` prints
-the effect of every action):
+```bash
+lazr verify DIR            # build + headless frame + every action, with the effect
+lazr live FILE --check     # "Plus": count: 0 → 1 — actions really apply
+lazr live FILE --problems  # what the runtime did not understand (0 — all clear)
+lazr live FILE --trace     # click "Plus": count: 0 → 1 — click tracing in the window
+```
 
-| File | What it shows |
+`verify` prints **what changed**, not "ok":
+
+```
+$ lazr verify /tmp/ci-todo
+build: ok
+headless ok: 11 shapes, 11 widgets in the model
+action "Add": items: [] → [""]
+action "Done": done: 0 → 1
+action "Clear": items: [""] → []
+selftest ok: 4 actions
+result: verified
+```
+
+Two adversarial scripts cover the GUI: `scripts/check-paint.py` (contour → fill → pixels → file → read) and
+`scripts/adversarial-paint.py` (6 attacks: Ctrl+Z on an empty history, 12 fast clicks, resize, …).
+
+## Packaging
+
+```console
+$ lazr package /tmp/paint --release
+binary: /tmp/paint/dist/kraski
+icon:   /tmp/paint/dist/icon.png      # rendered from docs/logo.svg
+entry:  /tmp/paint/dist/kraski.desktop
+archive:/tmp/paint/dist/kraski-release.tar.gz
+```
+
+## MCP
+
+`lazr mcp` — JSON-RPC over stdin/stdout, eight tools:
+
+| tool | what it does |
 |---|---|
-| `paint.lisp` | Paint: 8 tools, palette, undo, contour fill, files and system dialogs |
-| `dashboard.lisp` | Dashboard: absolute `place` layout, anchors, theme, cards |
-| `calc.lisp` | Budget: arithmetic in handlers (`*`, `/`), step slider |
-| `settings.lisp` | Settings: light theme, checkbox, slider, text input, `do` with two assignments |
-| `quiz.lisp` | Quiz: two counters, several actions in one button |
-| `todo.lisp` / `.lazr` | Tasks: a list of strings, `append`/`remove`/`clear`, text input, counters |
-| `gate.lisp` / `.lazr` | Access: string comparison and conditionally shown panels |
-| `thermostat.lisp` | Thermostat: numbers, thresholds and gated panels |
-| `live-demo.lisp` / `.lazr` | Runtime showcase: edit the file, the window follows without a rebuild |
+| `form_new` | create a project (model + app) |
+| `form_state` | declare a state field |
+| `form_add` | add a widget (kind, text, bind, action, container) |
+| `form_show` | print the model as text |
+| `form_widgets` | list widgets with paths `/0/1` |
+| `form_generate` | regenerate Rust |
+| `form_build` | build and return the log tail |
+| `form_headless` | run one frame and return the shape count |
 
-A custom widget cannot exist in the runtime (it is Rust code), so `custom` is drawn as an honest placeholder
-saying a build is required instead of silently disappearing.
+Answers are always JSON; errors are `isError: true` with a code and a hint so an agent can fix itself.
+
+## How it differs
+
+| Tool | What it does | What it lacks |
+|---|---|---|
+| **Slint** (1.17+) | built-in MCP: inspects the running window tree, clicks, screenshots, headless | that is **inspection and control**, not authorship: the UI is still written in `.slint` by hand or by an agent |
+| **Ruxel Studio** (VS Code) | two-way code/canvas editing for iced/egui/slint/dioxus | lives in the editor, no MCP, no verification by execution |
+| **iced** (`comet`, `cargo-hot`) | debugger and hot reload | for a human, not for an agent |
+| **Lazarus/Delphi** | components, events, `.lfm` as a form model | not Rust, no MCP, verification only by a human |
+| **lazr** | model + named operations + deterministic generation + verification by build, frame and action runs + MCP | young: no installer or signature, `custom` requires a build |
+
+## What is missing (honestly)
+
+- **A custom widget in live mode.** `custom` is Rust code, so `lazr live` draws an honest "needs a build"
+  placeholder instead of silently skipping it.
+- **Lazarus-grade layout.** Absolute points and two anchors exist; percentages, Qt-style edge constraints and
+  reflow on resize do not.
+- **CSS-grade styles.** Custom font files, shadows and background images are absent.
+- **Handlers beyond expressions.** No function calls or nested structures — that moves into `rust widget`, and
+  then it is no longer the model.
+- **Model history.** Git exists; built-in undo and model branching do not.
+- **Packaging.** No installer and no signature: a signature needs keys, not a config checkbox.
+- **List row templates.** A list row is text plus "✖"; a custom row template (checkbox, buttons) is planned.
 
 ## Install
 
@@ -301,65 +270,15 @@ $ lazr add hello button "Plus" --do "count += 1" --style "icon:play, key:ctrl+pl
 $ lazr verify hello
 ```
 
-S-expressions:
+A shared `CARGO_TARGET_DIR` (`LAZR_TARGET_DIR`, defaults to `~/.cache/lazr/target`) saves minutes: the agent does
+not recompile egui on every step.
 
-```console
-$ lazr lisp examples/paint.lisp                    # model as text
-$ lazr lisp examples/paint.lisp --to /tmp/paint    # model + project + generated code
-```
-
-A shared `CARGO_TARGET_DIR` (`LAZR_TARGET_DIR`, defaults to `~/.cache/lazr/target`) saves minutes: the agent
-does not recompile egui on every step.
-
-## MCP
-
-`lazr mcp` — JSON-RPC over stdin/stdout, eight tools:
-
-| tool | what it does |
-|---|---|
-| `form_new` | create a project (model + app) |
-| `form_state` | declare a state field |
-| `form_add` | add a widget (kind, text, binding, action, container) |
-| `form_show` | show the model as text |
-| `form_widgets` | list widgets with paths `/0/1` |
-| `form_generate` | regenerate the Rust code |
-| `form_build` | build (`cargo build --offline`) and return the log tail |
-| `form_headless` | run one frame and return the shape count |
-
-Replies are always JSON; errors are `isError: true` with a code and a hint so the agent can fix itself.
-
-## How this differs from what already exists
-
-| Tool | What it does | What is missing |
-|---|---|---|
-| **Slint** (1.17+) | built-in MCP: inspects the live window tree, clicks, takes screenshots, headless backend | that is **inspection and control**, not authorship: the screen is still written by hand in `.slint` |
-| **Ruxel Studio** (VS Code, alpha) | two-way code/canvas editing (`syn`/`quote`) for iced/egui/slint/dioxus | lives in the editor, no MCP, no verification by running |
-| **iced** (`comet`, `cargo-hot`) | debugger and hot reload | for humans, not for agents |
-| **Lazarus/Delphi** | components, events, `.lfm` as a form model | not Rust, no MCP, verification only by a human |
-
-`lazr` fills exactly the **authorship** gap: a model + operations + deterministic generation + verification by
-build, frame and action run.
-
-## What is still missing (honestly)
-
-* **layout**: `vbox`/`hbox`/`grid`/`scroll`/`place`, absolute points, sizes and right/bottom anchors exist;
-  percentages of the container, Qt-style edge constraints and reflow on window resize do not;
-* **styles**: size, weight, color, padding, alignment and a theme (font, accent, spacing, radius) exist; custom
-  font files, shadows and background images do not;
-* **custom widgets**: a custom widget is a block of Rust code; there is no DSL for its internals;
-* **handlers**: conditions and arithmetic exist, function calls and lists do not — anything beyond that moves
-  into `rust widget`, and then it is no longer the model;
-* **model history**: git exists, a built-in undo/branching of the model does not;
-* **packaging**: binary, icon, `.desktop` and tar.gz exist; an installer and a signature do not — a signature
-  needs keys, not a checkbox;
-* **runtime Lisp**: S-expressions are the author's language today, not an interpreter inside the app; a real
-  Lisp machine (editing forms without recompiling, hot reload) is the next step.
-
-## Tests
+## Development
 
 ```bash
-cargo test        # 37 tests: model, layout, theme, action language, S-expressions, generation
-cargo run -- demo # end-to-end: model → code → build → headless
+cargo test              # 51 tests: model, layout, theme, action language, lists, when/else, S-expressions, codegen
+cargo run -- demo       # end-to-end: model → code → build → headless
+cargo run -- live examples/todo.lisp   # live model
 ```
 
 License: MIT.

@@ -60,6 +60,22 @@
   .term{background:#0b0f14;border:1px solid var(--line);border-radius:14px;padding:16px 18px;font-size:13.5px;
         overflow:auto;color:#cfd8e6}
   .term .ok{color:var(--green)} .term .p{color:var(--flame)}
+  .cta{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:26px 0 6px}
+  .btn{display:inline-block;border:1px solid var(--line);border-radius:10px;padding:11px 18px;font-size:15px;
+       color:var(--ink);background:#121821;text-decoration:none}
+  .btn:hover{border-color:var(--flame);text-decoration:none}
+  .btn.primary{background:linear-gradient(100deg,var(--amber),var(--flame));color:#151006;border-color:transparent;font-weight:600}
+  .cta-note{color:var(--muted);font-size:13px}
+  .hero-shot{margin-top:22px}
+  .nums{width:100%;border-collapse:collapse;font-size:15px;max-width:560px}
+  .nums td{padding:9px 12px;border-bottom:1px solid var(--line);color:var(--muted)}
+  .nums td:last-child{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
+  .nums tr:last-child td{border-bottom:none}
+  .shots{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+  .shots figure{margin:0}
+  .shots img{width:100%;border:1px solid var(--line);border-radius:14px;display:block}
+  .shots figcaption{color:var(--muted);font-size:13px;padding-top:8px}
+  @media (max-width:820px){.shots{grid-template-columns:1fr}}
   .demos{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
   .demo{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
   .demo h3{margin:0 0 4px;font-size:16px}
@@ -80,14 +96,23 @@
       S-expressions — and <code>lazr</code> turns it into a real egui/eframe project and verifies it by running.
       Rust stays the HAL: window, memory, pixels. A runtime can also execute the model live, without a rebuild.</p>
     <div class="badges">
-      <span class="badge"><b>37</b> tests</span>
+      <span class="badge"><b>51</b> tests</span>
       <span class="badge"><b>0</b> dependencies in the tool</span>
       <span class="badge">MCP inside</span>
       <span class="badge">deterministic generation</span>
+      <span class="badge"><b>16</b> demo models</span>
       <span class="badge">live runtime</span>
     </div>
   </div>
 </header>
+
+<div class="cta">
+  <a class="btn primary" href="https://github.com/kostyk348/lazr">Open on GitHub →</a>
+  <a class="btn" href="#start">Install in a minute</a>
+  <span class="cta-note">one binary · zero dependencies · no installer needed</span>
+</div>
+
+<div class="shot hero-shot"><img src="paint.png" alt="Paint — a whole application described by a model"></div>
 
 <section>
   <h2>Three steps, no mouse dragging</h2>
@@ -100,6 +125,33 @@
       <p>Generation is deterministic: one model — one and the same text, so the output lives in git and diffs cleanly.</p></div>
     <div class="step"><div class="n">03 verify</div><h3>Three facts</h3>
       <p><code>verify</code> = it builds + it renders headless + every button action is called and does not panic.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Speed, measured rather than promised</h2>
+  <p class="sub">Measured on this machine, ordinary disk, warm shared build cache. The first egui build is 17 s;
+    after that everything is milliseconds.</p>
+  <table class="nums">
+    <tr><td>model → code</td><td><b>3 ms</b></td></tr>
+    <tr><td>code → built app</td><td><b>751 ms</b></td></tr>
+    <tr><td>edit the model → rebuild</td><td><b>410 ms</b></td></tr>
+    <tr><td>check the actions</td><td><b>89 ms</b></td></tr>
+    <tr><td>the whole test suite</td><td><b>18 ms</b></td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>Who it is for</h2>
+  <div class="grid">
+    <div class="feat"><h3>Agents and operators</h3><p>The UI is edited by commands and verified without a human:
+      <code>verify</code> prints the effect, not "ok".</p></div>
+    <div class="feat"><h3>Rust GUI developers</h3><p>No <code>ui.horizontal(|ui| {{ … }})</code> per layout row —
+      one model line instead of a block.</p></div>
+    <div class="feat"><h3>Internal tools</h3><p>Dashboards, panels, forms, "an admin page in one evening" —
+      no Electron, no npm.</p></div>
+    <div class="feat"><h3>Minimalists</h3><p>One binary, zero dependencies in the tool, generation without
+      network access.</p></div>
   </div>
 </section>
 
@@ -165,7 +217,7 @@ problems: 0
     <div class="demo"><h3>Budget</h3><p>Arithmetic in handlers: <code>(set! total (* total 2))</code>, a step slider.</p><code>examples/calc.lisp</code></div>
     <div class="demo"><h3>Settings</h3><p>Light theme, checkbox, slider, text input, reset via <code>do</code>.</p><code>examples/settings.lisp</code></div>
     <div class="demo"><h3>Access</h3><p>String comparison and conditionally shown panels: <code>when code == "42"</code>.</p><code>examples/gate.lisp</code></div>
-    <div class="demo"><h3>Thermostat</h3><p>Numbers and thresholds: "hot"/"normal" panels via <code>when</code>.</p><code>examples/thermostat.lisp</code></div>
+    <div class="demo"><h3>Thermostat</h3><p>Numbers and thresholds: "hot"/"normal" panels via <code>when … else</code>.</p><code>examples/thermostat.lisp</code></div>
     <div class="demo"><h3>Tasks</h3><p>A list of strings: <code>append</code>, <code>remove</code>,
       <code>clear</code>, a text input and counters.</p><code>examples/todo.lisp</code></div>
     <div class="demo"><h3>Quiz</h3><p>Score and attempts counters, several handlers per row.</p><code>examples/quiz.lisp</code></div>
@@ -198,8 +250,8 @@ archive:/tmp/paint/dist/kraski-release.tar.gz</div>
       code where the DSL ends — and it is still checked by the headless frame.</p></div>
     <div class="feat"><h3>Action language</h3><p><code>if</code>, comparisons, arithmetic over fields,
       increments; types are checked before <code>cargo build</code>.</p></div>
-    <div class="feat"><h3>Conditions</h3><p><code>when</code> shows children only when the condition holds:
-      number and string comparisons, a bare boolean field. Type errors before the build.</p></div>
+    <div class="feat"><h3>Conditions</h3><p><code>when … else</code> shows children by a condition: number and
+      string comparisons, a bare boolean field. Type errors before the build.</p></div>
     <div class="feat"><h3>Lists</h3><p>A <code>list</code> field, a widget with rows and delete, three
       operations (<code>append</code>, <code>remove</code>, <code>clear</code>) type-checked before the build.</p></div>
     <div class="feat"><h3>Verification</h3><p><code>verify</code>, <code>live --check</code>,
@@ -223,9 +275,13 @@ archive:/tmp/paint/dist/kraski-release.tar.gz</div>
         honestly shows a placeholder saying a build is required.</li>
     </ul>
   </div>
+  <div class="shots">
+    <figure><img src="gate.png" alt="Access: a panel gated by a condition"><figcaption>Access — string comparison and gated panels</figcaption></figure>
+    <figure><img src="thermostat.png" alt="Thermostat: thresholds and the else branch"><figcaption>Thermostat — numbers, thresholds and <code>when … else</code></figcaption></figure>
+  </div>
 </section>
 
-<section>
+<section id="start">
   <h2>Try it</h2>
   <div class="term"><span class="p">$</span> git clone https://github.com/kostyk348/lazr &amp;&amp; cd lazr
 <span class="p">$</span> cargo install --path .

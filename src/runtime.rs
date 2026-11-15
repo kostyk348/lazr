@@ -153,7 +153,7 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
     let mut stack: Vec<(usize, Vec<usize>)> = vec![(0, Vec::new())];
     let known = [
         "label", "button", "checkbox", "text_input", "slider", "space", "separator", "vbox", "hbox", "grid",
-        "scroll", "place", "list", "when", "custom",
+        "scroll", "place", "list", "when", "else", "custom",
     ];
     let mut in_rust = false;
     // глубина фигурных скобок внутри блока rust: внутри бывают свои «}»,
@@ -249,6 +249,39 @@ fn parse_model(text: &str) -> (Model, Vec<String>) {
                     ));
                 }
             }
+        }
+        if head == "else" {
+            // else — ветка предыдущего when, а не отдельный виджет
+            let Some((when_depth, when_path)) = stack.last().cloned() else {
+                problems.push(format!("строка {line_no}: else без when"));
+                continue;
+            };
+            if when_depth != depth {
+                problems.push(format!("строка {line_no}: else без when"));
+                continue;
+            }
+            let mut parent_path = when_path.clone();
+            let Some(index) = parent_path.pop() else {
+                problems.push(format!("строка {line_no}: else без when"));
+                continue;
+            };
+            let parent = node_list(&mut model.root, &parent_path);
+            let is_when = parent
+                .get(index)
+                .map(|n| n.kind == "when")
+                .unwrap_or(false);
+            if !is_when {
+                problems.push(format!("строка {line_no}: else без when"));
+                continue;
+            }
+            parent[index].children.push(Node {
+                kind: "else".to_string(),
+                ..Default::default()
+            });
+            let mut else_path = when_path;
+            else_path.push(parent[index].children.len() - 1);
+            stack.push((depth, else_path));
+            continue;
         }
         while stack.len() > 1 && stack.last().map(|(d, _)| *d >= depth).unwrap_or(false) {
             stack.pop();
@@ -943,7 +976,7 @@ fn build_node(
     };
     let container = matches!(
         head,
-        "vbox" | "hbox" | "grid" | "scroll" | "place" | "when"
+        "vbox" | "hbox" | "grid" | "scroll" | "place" | "when" | "else"
     );
     let mut index = 0;
     if head == "when" {
@@ -989,6 +1022,26 @@ fn build_node(
         match &args[index] {
             Sexp::List(items) => {
                 let child_head = items.first().and_then(Sexp::text).unwrap_or_default();
+                if child_head == "else" {
+                    // (else …) внутри when — вторая ветка
+                    let mut branch = Node {
+                        kind: "else".to_string(),
+                        ..Default::default()
+                    };
+                    for form in &items[1..] {
+                        if let Sexp::List(inner) = form {
+                            let head = inner.first().and_then(Sexp::text).unwrap_or_default();
+                            match build_node(&head, &inner[1..], counter, problems) {
+                                Ok(Some(child)) => branch.children.push(child),
+                                Ok(None) => {}
+                                Err(err) => problems.push(err),
+                            }
+                        }
+                    }
+                    node.children.push(branch);
+                    index += 1;
+                    continue;
+                }
                 if child_head == "set!" || child_head == "if" || child_head == "do" {
                     node.handler = Some(Sexp::List(items.clone()));
                 } else {
@@ -1098,7 +1151,7 @@ fn build_node(
     if !matches!(
         kind.as_str(),
         "label" | "button" | "checkbox" | "text_input" | "slider" | "space" | "separator" | "vbox"
-            | "hbox" | "grid" | "scroll" | "place" | "list" | "when" | "custom"
+            | "hbox" | "grid" | "scroll" | "place" | "list" | "when" | "else" | "custom"
     ) {
         return Err(format!("форма «{head}» рантайму неизвестна"));
     }
@@ -1437,9 +1490,19 @@ fn draw_node(ui: &mut egui::Ui, node: &Node, state: &mut HashMap<String, Value>)
                 Some(form) => eval_condition_sexp(state, form),
                 None => eval_condition(state, &node.text),
             };
-            if truth {
-                for child in &node.children {
+            let mut branch: Option<&Node> = None;
+            for child in &node.children {
+                if child.kind == "else" {
+                    branch = Some(child);
+                } else if truth {
                     draw_node(ui, child, state);
+                }
+            }
+            if !truth {
+                if let Some(other) = branch {
+                    for child in &other.children {
+                        draw_node(ui, child, state);
+                    }
                 }
             }
         }

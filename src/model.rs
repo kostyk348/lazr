@@ -177,6 +177,8 @@ pub enum WidgetKind {
     List,
     /// Условная видимость: показывает детей только когда условие истинно.
     When,
+    /// Ветка «иначе»: не самостоятельный виджет, а дети when.
+    Else,
     Custom(String),
 }
 
@@ -197,6 +199,8 @@ impl WidgetKind {
             WidgetKind::Place => "place",
             WidgetKind::List => "list",
             WidgetKind::When => "when",
+            WidgetKind::Else => "else",
+            WidgetKind::Else => "else",
             WidgetKind::Custom(_) => "custom",
         }
     }
@@ -209,6 +213,7 @@ impl WidgetKind {
                 | WidgetKind::Scroll
                 | WidgetKind::Place
                 | WidgetKind::When
+                | WidgetKind::Else
         )
     }
     pub fn parse_kind(text: &str) -> Option<WidgetKind> {
@@ -227,6 +232,8 @@ impl WidgetKind {
             "place" => WidgetKind::Place,
             "list" => WidgetKind::List,
             "when" => WidgetKind::When,
+            "else" => WidgetKind::Else,
+            "else" => WidgetKind::Else,
             _ => return None,
         })
     }
@@ -246,6 +253,8 @@ impl WidgetKind {
             "place",
             "list",
             "when",
+            "else",
+            "else",
             "custom",
         ]
     }
@@ -826,6 +835,60 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     }
                 }
 
+                // «else» с тем же отступом относится к предыдущему when, поэтому
+                // сначала кладём его внутрь when, а потом уже закрываем уровни.
+                if kind == WidgetKind::Else {
+                    let Some((when_depth, when_path)) = stack.last().cloned() else {
+                        errors.push(ModelError {
+                            line: line_no,
+                            code: "ELSE_WITHOUT_WHEN",
+                            message: "«else» без when".into(),
+                            hint: "else идёт сразу после блока when".into(),
+                        });
+                        continue;
+                    };
+                    if when_depth != depth {
+                        errors.push(ModelError {
+                            line: line_no,
+                            code: "ELSE_WITHOUT_WHEN",
+                            message: "«else» без when".into(),
+                            hint: "отступ у else такой же, как у when".into(),
+                        });
+                        continue;
+                    }
+                    // when_path указывает на сам when, поэтому смотрим на список родителя
+                    let mut parent_path = when_path.clone();
+                    let Some(index) = parent_path.pop() else {
+                        errors.push(ModelError {
+                            line: line_no,
+                            code: "ELSE_WITHOUT_WHEN",
+                            message: "«else» без when".into(),
+                            hint: "else идёт сразу после блока when".into(),
+                        });
+                        continue;
+                    };
+                    let parent = child_list(&mut screen.root, &parent_path);
+                    let is_when = parent
+                        .get(index)
+                        .map(|w| w.kind == WidgetKind::When)
+                        .unwrap_or(false);
+                    if !is_when {
+                        errors.push(ModelError {
+                            line: line_no,
+                            code: "ELSE_WITHOUT_WHEN",
+                            message: "«else» без when".into(),
+                            hint: "else идёт сразу после блока when".into(),
+                        });
+                        continue;
+                    }
+                    parent[index]
+                        .children
+                        .push(Widget::container(WidgetKind::Else));
+                    let mut else_path = when_path;
+                    else_path.push(parent[index].children.len() - 1);
+                    stack.push((depth, else_path));
+                    continue;
+                }
                 while stack.len() > 1 && stack.last().map(|(d, _)| *d >= depth).unwrap_or(false) {
                     stack.pop();
                 }
@@ -1200,6 +1263,22 @@ fn render_widgets(widgets: &[Widget], depth: usize, out: &mut String) {
         }
         out.push_str(&line);
         out.push('\n');
+        // Ветка else пишется на уровне when, а не глубже: так это читается как if/else.
+        if widget.kind == WidgetKind::When {
+            let mut branch: Option<&Widget> = None;
+            for child in &widget.children {
+                if child.kind == WidgetKind::Else {
+                    branch = Some(child);
+                } else {
+                    render_widgets(std::slice::from_ref(child), depth + 1, out);
+                }
+            }
+            if let Some(else_branch) = branch {
+                out.push_str(&format!("{pad}else\n"));
+                render_widgets(&else_branch.children, depth + 1, out);
+            }
+            continue;
+        }
         render_widgets(&widget.children, depth + 1, out);
     }
 }
@@ -1411,5 +1490,23 @@ theme dark accent:#388bfd font:16 spacing:12 round:10
     fn when_keeps_string_literal() {
         let screen = parse("state code string\nwhen code == \"42\"\n  label \"ок\"\n").unwrap();
         assert_eq!(screen.root[0].text, "code == \"42\"");
+    }
+
+    #[test]
+    fn else_belongs_to_when() {
+        let screen =
+            parse("state n int 1\nwhen n > 2\n  label \"да\"\nelse\n  label \"нет\"\n").unwrap();
+        let node = &screen.root[0];
+        assert_eq!(node.kind, WidgetKind::When);
+        assert!(node.children.iter().any(|c| c.kind == WidgetKind::Else));
+    }
+
+    #[test]
+    fn else_without_when_is_error() {
+        let errors = parse("state n int 1\nlabel \"x\"\nelse\n  label \"y\"\n").unwrap_err();
+        assert!(
+            errors.iter().any(|e| e.code == "ELSE_WITHOUT_WHEN"),
+            "{errors:?}"
+        );
     }
 }

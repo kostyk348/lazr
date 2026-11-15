@@ -61,6 +61,22 @@
   .honest li{margin:6px 0}
   footer{padding:40px 0 64px;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
   .links{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
+  .cta{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:26px 0 6px}
+  .btn{display:inline-block;border:1px solid var(--line);border-radius:10px;padding:11px 18px;font-size:15px;
+       color:var(--ink);background:#121821;text-decoration:none}
+  .btn:hover{border-color:var(--flame);text-decoration:none}
+  .btn.primary{background:linear-gradient(100deg,var(--amber),var(--flame));color:#151006;border-color:transparent;font-weight:600}
+  .cta-note{color:var(--muted);font-size:13px}
+  .hero-shot{margin-top:22px}
+  .nums{width:100%;border-collapse:collapse;font-size:15px;max-width:560px}
+  .nums td{padding:9px 12px;border-bottom:1px solid var(--line);color:var(--muted)}
+  .nums td:last-child{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
+  .nums tr:last-child td{border-bottom:none}
+  .shots{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+  .shots figure{margin:0}
+  .shots img{width:100%;border:1px solid var(--line);border-radius:14px;display:block}
+  .shots figcaption{color:var(--muted);font-size:13px;padding-top:8px}
+  @media (max-width:820px){.shots{grid-template-columns:1fr}}
   .demos{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
   .demo{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
   .demo h3{margin:0 0 4px;font-size:16px}
@@ -84,13 +100,22 @@
       S-выражениями, — а <code>lazr</code> собирает из неё настоящий проект на egui/eframe и проверяет его
       запуском. Rust остаётся HAL: окно, память, пиксели.</p>
     <div class="badges">
-      <span class="badge"><b>37</b> тестов</span>
+      <span class="badge"><b>51</b> тест</span>
       <span class="badge"><b>0</b> зависимостей у инструмента</span>
+      <span class="badge"><b>16</b> моделей-демок</span>
       <span class="badge">MCP внутри</span>
-      <span class="badge">детерминированная генерация</span>
+      <span class="badge">живой рантайм</span>
     </div>
   </div>
 </header>
+
+<div class="cta">
+  <a class="btn primary" href="https://github.com/kostyk348/lazr">Открыть на GitHub →</a>
+  <a class="btn" href="#start">Установить за минуту</a>
+  <span class="cta-note">один бинарь · ноль зависимостей · ни одного установщика</span>
+</div>
+
+<div class="shot hero-shot"><img src="paint.png" alt="Краски — приложение, целиком описанное моделью"></div>
 
 <section>
   <h2>Три шага, без драга мышью</h2>
@@ -103,6 +128,33 @@
       <p>Генерация детерминированная: одна модель — один и тот же текст. Сгенерированный код живёт в git и диффится.</p></div>
     <div class="step"><div class="n">03 проверка</div><h3>Три факта</h3>
       <p><code>verify</code> = собралось + нарисовалось без окна + все действия кнопок вызваны и не упали.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Скорость, замеренная, а не обещанная</h2>
+  <p class="sub">Замеры на этой машине, обычный диск, тёплый общий кэш сборки. Первая сборка egui — 17 с, дальше
+    всё измеряется миллисекундами.</p>
+  <table class="nums">
+    <tr><td>модель → код</td><td><b>3 мс</b></td></tr>
+    <tr><td>код → собранное приложение</td><td><b>751 мс</b></td></tr>
+    <tr><td>правка модели → пересборка</td><td><b>410 мс</b></td></tr>
+    <tr><td>проверка действий</td><td><b>89 мс</b></td></tr>
+    <tr><td>все тесты lazr</td><td><b>18 мс</b></td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>Кому это нужно</h2>
+  <div class="grid">
+    <div class="feat"><h3>Агентам и операторам</h3><p>Интерфейс правится командами и проверяется без человека:
+      <code>verify</code> печатает эффект, а не «ok».</p></div>
+    <div class="feat"><h3>Тем, кто пишет GUI на Rust</h3><p>Никаких <code>ui.horizontal(|ui| {{ … }})</code> на каждую
+      строку раскладки — строка модели вместо блока.</p></div>
+    <div class="feat"><h3>Внутренним инструментам</h3><p>Пульты, панели, формы, «админка на один вечер» —
+      без Electron и без npm.</p></div>
+    <div class="feat"><h3>Тем, кто не хочет ставить лишнее</h3><p>Один бинарь, ноль зависимостей
+      в инструменте, генерация без сети.</p></div>
   </div>
 </section>
 
@@ -238,13 +290,15 @@ selftest ok: 2 действий
     <ul>
       <li><b>Раскладка как в Lazarus</b> — абсолютные точки и два якоря уже есть; нет процентов от контейнера,
         привязок к краям как в Qt и пересчёта формы при ресайзе.</li>
-      <li><b>Стили как в CSS</b> — нет шрифтов, тем, теней, скруглений.</li>
-      <li><b>Сложные обработчики</b> — условия и арифметика есть, вызовов функций и списков нет: всё сверх
+      <li><b>Стили как в CSS</b> — тема строкой (акцент, кегль, отступы, радиус) есть; шрифтов из файлов,
+        теней и фоновых картинок нет.</li>
+      <li><b>Сложные обработчики</b> — условия, арифметика и списки есть; вызовов функций нет: всё сверх
         этого уходит в <code>rust widget</code>, и тогда это уже не модель.</li>
       <li><b>История модели</b> — git есть, встроенного undo/веток модели нет.</li>
       <li><b>Упаковка</b> — нет установщика и подписи бинаря: есть <code>.desktop</code>, иконка и архив.</li>
-      <li><b>Рантайм-Lisp</b> — S-выражения сегодня язык автора, а не интерпретатор внутри приложения.
-        Lisp-машина в полном смысле (правка форм без пересборки) — следующий шаг.</li>
+      <li><b>Свой виджет в живом режиме</b> — <code>custom</code> это Rust-код, поэтому <code>lazr live</code>
+        рисует честную заглушку «нужна сборка».</li>
+      <li><b>Шаблон строки списка</b> — строка списка сейчас текст с «✖»; свой шаблон (чекбокс, кнопки) в планах.</li>
     </ul>
   </div>
 </section>
@@ -262,15 +316,19 @@ selftest ok: 2 действий
     <div class="demo"><h3>Настройки</h3><p>Светлая тема, чекбокс, слайдер, поле ввода, сброс через
       <code>do</code>.</p><code>examples/settings.lisp</code></div>
     <div class="demo"><h3>Доступ</h3><p>Сравнение строк и панели по условию: <code>when code == "42"</code>.</p><code>examples/gate.lisp</code></div>
-    <div class="demo"><h3>Термостат</h3><p>Числа и пороги: панели «жарко»/«норма» через <code>when</code>.</p><code>examples/thermostat.lisp</code></div>
+    <div class="demo"><h3>Термостат</h3><p>Числа и пороги: панели «жарко»/«норма» через <code>when … else</code>.</p><code>examples/thermostat.lisp</code></div>
     <div class="demo"><h3>Задачи</h3><p>Список строк: <code>append</code>, <code>remove</code>,
       <code>clear</code>, поле ввода и счётчики.</p><code>examples/todo.lisp</code></div>
     <div class="demo"><h3>Викторина</h3><p>Счёт и число попыток, несколько действий в кнопке.</p><code>examples/quiz.lisp</code></div>
     <div class="demo"><h3>Живая модель</h3><p>Витрина рантайма: правишь файл — окно следует.</p><code>examples/live-demo.lisp</code></div>
   </div>
+  <div class="shots">
+    <figure><img src="gate.png" alt="Доступ: панель по условию"><figcaption>Доступ — сравнение строк и панели по условию</figcaption></figure>
+    <figure><img src="thermostat.png" alt="Термостат: пороги и ветка else"><figcaption>Термостат — числа, пороги и <code>when … else</code></figcaption></figure>
+  </div>
 </section>
 
-<section>
+<section id="start">
   <h2>Как запустить</h2>
   <div class="term">
 <span class="p">$</span> git clone https://github.com/kostyk348/lazr &amp;&amp; cd lazr

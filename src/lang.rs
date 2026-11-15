@@ -539,6 +539,18 @@ impl Builder {
         while i < args.len() {
             match &args[i] {
                 Value::List(child) => {
+                    // (else …) внутри when — вторая ветка, а не виджет
+                    if child.first().and_then(Value::text).as_deref() == Some("else") {
+                        let mut branch = Widget::container(WidgetKind::Else);
+                        for form in &child[1..] {
+                            if let Some(w) = self.widget(form)? {
+                                branch.children.push(w);
+                            }
+                        }
+                        widget.children.push(branch);
+                        i += 1;
+                        continue;
+                    }
                     let nested = self.widget(&Value::List(child.clone()))?;
                     if let Some(child_widget) = nested {
                         widget.children.push(child_widget);
@@ -955,5 +967,19 @@ mod tests {
         assert_eq!(node.kind, crate::model::WidgetKind::When);
         assert_eq!(node.text, "n >= 3");
         assert_eq!(node.children.len(), 1);
+    }
+
+    #[test]
+    fn else_form_becomes_branch() {
+        let forms = crate::lang::read(
+            "(window \"П\" 400 300)\n(state n int 0)\n(when (> n 2) (label \"да\") (else (label \"нет\")))\n",
+        )
+        .unwrap();
+        let model = crate::lang::eval(&forms).unwrap();
+        let node = &model.screen.root[0];
+        assert!(node
+            .children
+            .iter()
+            .any(|c| c.kind == crate::model::WidgetKind::Else));
     }
 }
