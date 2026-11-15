@@ -513,6 +513,8 @@ pub struct Screen {
     pub icon_font: Option<String>,
     /// Файл, в котором приложение хранит значения полей между запусками.
     pub store: Option<String>,
+    /// PNG с иконкой окна: разбирается своим декодером на сборке.
+    pub window_icon: Option<String>,
     /// Свой TTF для текста интерфейса (Inter, JetBrains Mono, …).
     pub ui_font: Option<String>,
     /// Рамка, всегда сверху, минимум/максимум размера, перетаскивание.
@@ -828,6 +830,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
         theme: Theme::default(),
         icon_font: None,
         store: None,
+        window_icon: None,
         ui_font: None,
         window: WindowOptions::default(),
         root: Vec::new(),
@@ -1086,6 +1089,15 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     });
                 }
             }
+            "window-icon" | "window_icon" | "иконка" => match words.get(1) {
+                Some(path) => screen.window_icon = Some(path.trim_matches('"').to_string()),
+                None => errors.push(ModelError {
+                    line: line_no,
+                    code: "WINDOW_ICON_NEEDS_PATH",
+                    message: "у window-icon нет пути к PNG".into(),
+                    hint: "window-icon \"icon.png\"".into(),
+                }),
+            },
             "store" | "хранилище" | "state-file" => match words.get(1) {
                 Some(path) => screen.store = Some(path.trim_matches('"').to_string()),
                 None => errors.push(ModelError {
@@ -1590,6 +1602,9 @@ pub fn render(screen: &Screen) -> String {
     if let Some(path) = &screen.store {
         out.push_str(&format!("store {}\n", quote(path)));
     }
+    if let Some(path) = &screen.window_icon {
+        out.push_str(&format!("window-icon {}\n", quote(path)));
+    }
     for field in &screen.rust_fields {
         out.push_str(&format!(
             "rust field {} {} {}\n",
@@ -1766,6 +1781,19 @@ label "x""#;
         let twice = render(&parse(&once).expect("разбор после render"));
         assert_eq!(once, twice, "fmt должен быть идемпотентным");
         assert!(twice.contains("\n    let a = 1;\n"), "{twice}");
+    }
+
+    #[test]
+    fn window_icon_survives_render() {
+        let screen = parse("window \"Х\" 320 220\nwindow-icon \"icon.png\"\nlabel \"x\"")
+            .expect("модель с иконкой");
+        assert_eq!(screen.window_icon.as_deref(), Some("icon.png"));
+        let text = render(&screen);
+        assert!(text.contains("window-icon \"icon.png\""), "{text}");
+        assert_eq!(
+            parse(&text).expect("после render").window_icon,
+            screen.window_icon
+        );
     }
 
     #[test]

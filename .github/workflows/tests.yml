@@ -106,6 +106,17 @@ jobs:
           grep -q 'on_hover_text' /tmp/font-ci/app/src/main.rs
           cargo run -q -- headless /tmp/font-ci
           cargo run -q -- live /tmp/font-ci/form.lazr --problems | grep -q 'problems: 0'
+      - name: иконка окна из PNG (свой декодер)
+        run: |
+          rm -rf /tmp/icon-ci && mkdir -p /tmp/icon-ci
+          cargo run -q -- png docs/player.png --raw /tmp/icon-ci/player.rgba
+          test -s /tmp/icon-ci/player.rgba
+          printf 'window "И" 320 220\nwindow-icon "docs/player.png"\nlabel "x"\n' > /tmp/icon-ci/form.lazr
+          cargo run -q -- build /tmp/icon-ci
+          grep -q 'with_icon(egui::IconData' /tmp/icon-ci/app/src/main.rs
+          grep -q 'width: 48, height: 48' /tmp/icon-ci/app/src/main.rs
+          cargo run -q -- headless /tmp/icon-ci
+          ln -sf "$PWD/docs/player.png" /tmp/icon-ci/icon.png
       - name: своя рамка окна (генератор)
         run: |
           mkdir -p /tmp/frame-ci

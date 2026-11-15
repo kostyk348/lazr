@@ -1189,8 +1189,11 @@ impl State {{
 {fns}{widgets}{actions_code}{store_code}{chrome_fn}pub fn draw(state: &mut State, ui: &mut egui::Ui) {{
     // eframe 0.37 отдаёт голый Ui: фон окна никто не рисует, и светлая тема
     // выглядела чёрной. Красим панель сами — цвет берём из темы.
-    let background = ui.visuals().panel_fill;
-    ui.painter().rect_filled(ui.max_rect(), 0.0, background);
+    // При transparent:yes фон не красим — иначе прозрачность окна не видна.
+    if {paint_background} {{
+        let background = ui.visuals().panel_fill;
+        ui.painter().rect_filled(ui.max_rect(), 0.0, background);
+    }}
 {chrome_call}{body}}}
 
 struct App {{
@@ -1274,9 +1277,14 @@ fn main() {{
         width = screen.width,
         height = screen.height,
         title = rust_string(&screen.title),
-        viewport = viewport_code(screen),
+        viewport = viewport_code(screen)?,
         chrome_fn = chrome_function(screen),
         chrome_call = chrome_call(screen),
+        paint_background = if screen.window.transparent {
+            "false"
+        } else {
+            "true"
+        },
         store_code = store_code(screen),
         store_save_selftest = if screen.store.is_some() {
             "        store_save(&state);\n        println!(\"состояние записано: {}\", STORE);"
@@ -1459,7 +1467,7 @@ fn store_save(state: &State) {{
 }
 
 /// Опции окна в ViewportBuilder: рамка, размер, всегда сверху, минимум/максимум.
-fn viewport_code(screen: &Screen) -> String {
+fn viewport_code(screen: &Screen) -> Result<String, String> {
     use crate::model::Chrome;
     let window = &screen.window;
     let mut code = String::new();
@@ -1485,7 +1493,42 @@ fn viewport_code(screen: &Screen) -> String {
             "\n            .with_max_inner_size([{w}f32, {h}f32])"
         ));
     }
-    code
+    if let Some(path) = &screen.window_icon {
+        // Иконка разбирается своим PNG-декодером на сборке и вшивается пикселями:
+        // декодер в само приложение не тащим.
+        let bytes = std::fs::read(path).map_err(|err| format!("window-icon «{path}»: {err}"))?;
+        let image =
+            crate::png::decode(&bytes).map_err(|err| format!("window-icon «{path}»: {err}"))?;
+        let (width, height, pixels) = downscale(&image, 48);
+        let literal = pixels
+            .iter()
+            .map(|byte| byte.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        code.push_str(&format!(
+            "\n            .with_icon(egui::IconData {{ rgba: vec![{literal}], width: {width}, height: {height} }})"
+        ));
+    }
+    Ok(code)
+}
+
+/// Уменьшение «ближайшим соседом»: окно не покажет больше 48×48, а сгенерированный
+/// файл не должен раздуваться пикселями.
+fn downscale(image: &crate::png::Image, limit: u32) -> (u32, u32, Vec<u8>) {
+    if image.width <= limit && image.height <= limit {
+        return (image.width, image.height, image.rgba.clone());
+    }
+    let width = image.width.min(limit);
+    let height = image.height.min(limit);
+    let mut out = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        let source_y = (y as u64 * image.height as u64 / height as u64) as u32;
+        for x in 0..width {
+            let source_x = (x as u64 * image.width as u64 / width as u64) as u32;
+            out.extend_from_slice(&image.pixel(source_x, source_y));
+        }
+    }
+    (width, height, out)
 }
 
 /// Своя рамка: заголовок, перетаскивание, крестик. Рисуется без шрифтов —
@@ -1624,6 +1667,29 @@ label "x""#,
         );
         assert!(source.contains("struct ModelFields"), "нет слепка полей");
         assert!(source.contains("fn model_fields"), "нет снимка полей");
+    }
+
+    #[test]
+    fn window_icon_is_embedded_as_pixels() {
+        // Иконку делаем сами: 3×3 RGBA, чтобы тест не зависел от внешних файлов.
+        let dir = std::env::temp_dir().join("lazr-icon-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("icon.png");
+        std::fs::write(&path, crate::png::tests::rgba_png(3, 3, [10, 20, 30, 255])).unwrap();
+        let screen = parse(&format!(
+            "window \"Х\" 320 220\nwindow-icon \"{}\"\nlabel \"x\"",
+            path.display()
+        ))
+        .expect("модель с иконкой");
+        let source = main_rs(&screen, "h").expect("генерация");
+        assert!(
+            source.contains(".with_icon(egui::IconData"),
+            "иконка не вшита"
+        );
+        assert!(
+            source.contains("width: 3, height: 3"),
+            "размер иконки потерян"
+        );
     }
 
     #[test]

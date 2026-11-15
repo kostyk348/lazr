@@ -48,6 +48,7 @@ impl Project {
             theme: Default::default(),
             icon_font: None,
             store: None,
+            window_icon: None,
             ui_font: None,
             window: Default::default(),
             root: vec![Widget::container(WidgetKind::Vbox)],
@@ -209,7 +210,8 @@ impl Project {
         // Лицензия проекта и версия — людям, которые поставят пакет.
         let mut bundled = Vec::new();
         if let Ok(license) = std::fs::read_to_string("LICENSE") {
-            std::fs::write(dist.join("LICENSE"), license).map_err(|err| format!("LICENSE: {err}"))?;
+            std::fs::write(dist.join("LICENSE"), license)
+                .map_err(|err| format!("LICENSE: {err}"))?;
             bundled.push("LICENSE");
         }
         std::fs::write(

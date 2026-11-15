@@ -304,6 +304,16 @@ selftest ok: 2 действий
   </div>
 </section>
 
+<section id="icon">
+  <h2>Иконка окна своим декодером</h2>
+  <p class="sub"><code>window-icon "icon.png"</code> — PNG читает собственный декодер на <code>std</code>:
+    zlib с полным inflate, пять фильтров, палитра, 8 и 16 бит. Никаких <code>image</code> и <code>flate2</code>.</p>
+  <div class="term"><span class="p">window-icon</span> "icon.png"
+<span class="p">lazr png</span> icon.png --raw icon.rgba   <span class="c"># сравнить с convert icon.png rgba:-</span></div>
+  <p class="sub">Проверено: побайтовое совпадение с ImageMagick для четырёх видов PNG, а собранное окно
+    отдаёт иконку менеджеру — <code>xprop _NET_WM_ICON</code> печатает <code>Icon (48 x 48)</code>.</p>
+</section>
+
 <section id="store">
   <h2>Данные между запусками</h2>
   <p class="sub">Приложение помнит поля, а не только рисует их: <code>store "путь"</code> — и значения

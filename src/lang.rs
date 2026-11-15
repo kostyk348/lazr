@@ -261,6 +261,7 @@ pub fn eval(forms: &[Value]) -> Result<Evaluated, LispError> {
             theme: Default::default(),
             icon_font: None,
             store: None,
+            window_icon: None,
             ui_font: None,
             window: crate::model::WindowOptions::default(),
             root: vec![Widget::container(WidgetKind::Vbox)],
@@ -352,6 +353,13 @@ impl Builder {
                 })?;
                 let value = args.get(2).and_then(Value::text).unwrap_or_default();
                 self.screen.fields.push(Field { name, ty, value });
+                Ok(None)
+            }
+            "window-icon" | "window_icon" | "иконка" => {
+                let path = args.first().and_then(Value::text).ok_or_else(|| {
+                    LispError::new("(window-icon \"icon.png\")", "путь к PNG строкой")
+                })?;
+                self.screen.window_icon = Some(path);
                 Ok(None)
             }
             "store" | "хранилище" | "state-file" => {

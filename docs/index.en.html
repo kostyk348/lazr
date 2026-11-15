@@ -208,6 +208,16 @@ problems: 0
   <div class="shot"><img src="dashboard.png" alt="Dashboard window: three cards in a row, a journal below, buttons in the corners"></div>
 </section>
 
+<section id="icon">
+  <h2>A window icon with our own decoder</h2>
+  <p class="sub"><code>window-icon "icon.png"</code> — the PNG is read by a decoder built on <code>std</code> alone:
+    zlib with a full inflate, five filters, palette, 8 and 16 bit. No <code>image</code>, no <code>flate2</code>.</p>
+  <div class="term"><span class="p">window-icon</span> "icon.png"
+<span class="p">lazr png</span> icon.png --raw icon.rgba   <span class="c"># compare with convert icon.png rgba:-</span></div>
+  <p class="sub">Verified: byte-identical output against ImageMagick for four PNG kinds, and a built window hands
+    its icon to the manager — <code>xprop _NET_WM_ICON</code> prints <code>Icon (48 x 48)</code>.</p>
+</section>
+
 <section id="store">
   <h2>Data between runs</h2>
   <p class="sub">An app remembers its fields instead of only drawing them: <code>store "path"</code> reads

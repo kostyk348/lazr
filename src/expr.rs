@@ -639,6 +639,7 @@ mod tests {
             theme: crate::model::Theme::default(),
             icon_font: None,
             store: None,
+            window_icon: None,
             ui_font: None,
             window: crate::model::WindowOptions::default(),
             root: Vec::new(),

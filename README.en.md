@@ -192,6 +192,25 @@ lines), `font`, `spacing`, `round`. A style is data: one line in the model, zero
 What styles cannot do: lazr has no gradients, blur, shadows or textures — a style rests on palette, shape and
 rhythm, not on effects. The skill states that limitation honestly.
 
+## Window icon — without dependencies
+
+```
+window-icon "icon.png"
+```
+
+The PNG is decoded by **our own decoder** (`src/png.rs`): zlib with a full inflate (stored, fixed and
+dynamic Huffman), all five row filters, colour types 0/2/3/4/6, 8- and 16-bit depth. No `image`, no `png`,
+no `flate2` — only `std`, because pulling a dependency tree for 48×48 contradicts the zero-dependency rule.
+
+At build time the icon is nearest-neighbour-resized to 48×48 and embedded as pixels in `egui::IconData`
+(the decoder never ships into the app). Not supported: Adam7 interlacing — real icons do not use it, and a
+silent substitution would be worse than an error.
+
+Verified twice:
+- `lazr png FILE --raw OUT` compared with `convert FILE rgba:-` — **byte-identical** for RGBA, RGB, palette
+  and grayscale (24×24, 2304 bytes);
+- a built window hands its icon to the window manager: `xprop -id <window> _NET_WM_ICON` prints `Icon (48 x 48)`.
+
 ## State between runs
 
 An app has to remember data, not just draw it. One model line and every field persists:

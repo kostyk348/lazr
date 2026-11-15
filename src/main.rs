@@ -22,6 +22,7 @@ mod lang;
 mod live;
 mod mcp;
 mod model;
+mod png;
 mod project;
 mod runtime;
 
@@ -85,6 +86,7 @@ fn main() {
         Some("add") => cmd_add(&args[1..]),
         Some("show") => cmd_show(&args[1..]),
         Some("fmt") => cmd_fmt(&args[1..]),
+        Some("png") => cmd_png(&args[1..]),
         Some("gen") => cmd_gen(&args[1..]),
         Some("build") => cmd_build(&args[1..]),
         Some("run") => cmd_run(&args[1..]),
@@ -117,6 +119,7 @@ fn print_help() {
   add DIR KIND [TEXT] [--bind F] [--do \"поле += 1\"] [--container vbox|hbox]
   show DIR                           модель как текст
   fmt FILE|DIR [--check]             привести модель к канону (--check: только проверить)
+  png FILE [--raw OUT]               прочитать PNG своим декодером (RGBA в --raw)
   gen DIR                             перегенерировать app/
   build DIR
   run DIR                           cargo build --offline в app/
@@ -279,6 +282,46 @@ fn cmd_add(args: &[String]) -> i32 {
 
 /// Канонический вид модели: один и тот же смысл — один и тот же текст.
 /// `--check` ничего не пишет, но возвращает 1, если файл отформатирован иначе.
+/// Свой PNG-декодер «наружу»: можно посмотреть, что он прочитал, и сравнить
+/// с любым другим инструментом по сырым RGBA.
+fn cmd_png(args: &[String]) -> i32 {
+    let opts = Opts::parse(args);
+    let Some(path) = opts.positional().first().cloned() else {
+        eprintln!("lazr png FILE [--raw OUT]");
+        return 2;
+    };
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("не прочитать {path}: {err}");
+            return 1;
+        }
+    };
+    let image = match png::decode(&bytes) {
+        Ok(image) => image,
+        Err(err) => {
+            eprintln!("{path}: {err}");
+            return 1;
+        }
+    };
+    println!(
+        "{path}: {}x{}, RGBA {} байт",
+        image.width,
+        image.height,
+        image.rgba.len()
+    );
+    if let Some(out) = opts.flag("raw").map(str::to_string) {
+        match std::fs::write(&out, &image.rgba) {
+            Ok(()) => println!("сырые RGBA: {out}"),
+            Err(err) => {
+                eprintln!("не записать {out}: {err}");
+                return 1;
+            }
+        }
+    }
+    0
+}
+
 fn cmd_fmt(args: &[String]) -> i32 {
     let opts = Opts::parse(args);
     let check = opts.has("check");
