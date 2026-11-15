@@ -116,7 +116,8 @@ $ lazr package /tmp/paint --release
 ## Проверка — три факта, а не обещание
 
 ```console
-$ lazr verify /tmp/paint
+$ lazr run /tmp/paint       # сборка и запуск одной командой
+lazr verify /tmp/paint
 сборка: ок
 headless ok: 53 фигур, 18 виджетов в модели
   действие «Плюс»: ok

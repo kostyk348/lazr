@@ -1145,6 +1145,13 @@ fn render_widgets(widgets: &[Widget], depth: usize, out: &mut String) {
         let mut line = format!("{pad}{}", widget.kind.as_str());
         match &widget.kind {
             WidgetKind::Custom(name) => line.push_str(&format!(" {name}")),
+            // у when текст — условие, кавычки ему не нужны: when code == "42"
+            WidgetKind::When => {
+                if !widget.text.is_empty() {
+                    line.push(' ');
+                    line.push_str(&widget.text);
+                }
+            }
             _ => {
                 if !widget.text.is_empty() {
                     line.push(' ');

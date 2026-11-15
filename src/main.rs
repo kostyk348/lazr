@@ -14,6 +14,8 @@
 //! lazr demo
 //! ```
 
+use std::process::Command;
+
 mod codegen;
 mod expr;
 mod lang;
@@ -84,6 +86,7 @@ fn main() {
         Some("show") => cmd_show(&args[1..]),
         Some("gen") => cmd_gen(&args[1..]),
         Some("build") => cmd_build(&args[1..]),
+        Some("run") => cmd_run(&args[1..]),
         Some("package") => cmd_package(&args[1..]),
         Some("verify") => cmd_verify(&args[1..]),
         Some("headless") => cmd_headless(&args[1..]),
@@ -113,7 +116,8 @@ fn print_help() {
   add DIR KIND [TEXT] [--bind F] [--do \"поле += 1\"] [--container vbox|hbox]
   show DIR                           модель как текст
   gen DIR                             перегенерировать app/
-  build DIR                           cargo build --offline в app/
+  build DIR
+  run DIR                           cargo build --offline в app/
   headless DIR                        исполнить интерфейс один кадр без окна
   live FILE [--headless|--check|--problems|--trace]
                                       рантайм: окно читает модель на ходу
@@ -355,6 +359,41 @@ fn cmd_package(args: &[String]) -> i32 {
         }
         Err(err) => {
             eprintln!("{err}");
+            1
+        }
+    }
+}
+
+/// Собрать и запустить: одна команда вместо поиска бинаря в общем target dir.
+fn cmd_run(args: &[String]) -> i32 {
+    let opts = Opts::parse(args);
+    let dir = match dir_of(&opts, 0) {
+        Ok(dir) => dir,
+        Err(code) => return code,
+    };
+    let project = match Project::load(&dir) {
+        Ok(project) => project,
+        Err(err) => {
+            eprintln!("{err}");
+            return 1;
+        }
+    };
+    if let Err(err) = project.build() {
+        eprintln!("{err}");
+        return 1;
+    }
+    let binary = project.binary();
+    println!("запуск: {}", binary.display());
+    match Command::new(&binary).spawn() {
+        Ok(mut child) => match child.wait() {
+            Ok(status) => status.code().unwrap_or(0),
+            Err(err) => {
+                eprintln!("не дождаться приложения: {err}");
+                1
+            }
+        },
+        Err(err) => {
+            eprintln!("не запустить {}: {err}", binary.display());
             1
         }
     }

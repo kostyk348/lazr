@@ -117,7 +117,8 @@ signature — an honest boundary, not a forgotten checkbox.
 ## Verification — three facts, not a promise
 
 ```console
-$ lazr verify /tmp/paint
+$ lazr run /tmp/paint       # build and launch in one command
+lazr verify /tmp/paint
 build: ok
 headless ok: 53 shapes, 18 widgets in the model
   action "Plus": ok
