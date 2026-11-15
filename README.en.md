@@ -98,6 +98,7 @@ hermes mcp add lazr --command lazr --args mcp
 | State | `int`, `float`, `bool`, `string`, `list` (a list of strings with delete) |
 | Logic | `if/else`, comparisons (strings included), arithmetic, `append/remove/clear`, `when … else` in layout |
 | Verification | `verify`, `live --check`, `--problems`, `--trace`, two adversarial GUI scripts |
+| Canonical text | `lazr fmt FILE\|DIR [--check]` — one meaning, one text, idempotent |
 | Packaging | `lazr package` → binary + icon rendered from the logo + `.desktop` + `tar.gz` |
 | For agents | an MCP server inside: 8 tools, `lazr mcp` |
 
@@ -170,6 +171,10 @@ Measured on this machine with a warm shared build cache.
 <p align="center">
   <img src="docs/checklist.png" alt="Checklist: a list row template" width="420">
 </p>
+
+Version history lives in [CHANGELOG.md](CHANGELOG.md).
+
+Version history lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## 42 styles out of the box
 

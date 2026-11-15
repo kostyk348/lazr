@@ -1161,7 +1161,8 @@ use eframe::egui;
 #[allow(unused_imports)]
 use eframe::egui::NumExt;
 {helpers}{card_helpers}{theme}
-#[derive(Debug, Clone, PartialEq)]
+// Свои rust-поля (кисти, текстуры, каналы) не обязаны быть Debug/Clone,
+// поэтому State не выводит трейты: сравниваем и печатаем только поля модели.
 pub struct State {{
 {state_fields}}}
 
@@ -1288,12 +1289,12 @@ fn main() {{
             ""
         },
         store_before = if screen.store.is_some() {
-            "let before = self.state.clone();\n        "
+            "let before = model_fields(&self.state);\n        "
         } else {
             ""
         },
         store_after = if screen.store.is_some() {
-            "if before != self.state {\n            store_save(&self.state);\n        }"
+            "if store_changed(&before, &model_fields(&self.state)) {\n            store_save(&self.state);\n        }"
         } else {
             ""
         },
@@ -1401,6 +1402,22 @@ fn store_load(state: &mut State) {{
     }}
 }}
 
+/// Изменилось ли состояние: сравниваем только поля модели. Свои rust-поля
+/// (кисти, текстуры, каналы) сравнивать нельзя — они не обязаны быть Eq.
+/// Слепок полей модели: дешёвый, сравнимый и без требований к своим типам.
+#[derive(PartialEq)]
+struct ModelFields {{
+{field_decls}}}
+
+fn model_fields(state: &State) -> ModelFields {{
+    ModelFields {{
+{field_inits}    }}
+}}
+
+fn store_changed(before: &ModelFields, after: &ModelFields) -> bool {{
+    before != after
+}}
+
 fn store_save(state: &State) {{
     let mut out = String::new();
 {save}    let path = store_path();
@@ -1417,7 +1434,27 @@ fn store_save(state: &State) {{
 }}
 "#,
         load = load,
-        save = save
+        save = save,
+        field_decls = screen
+            .fields
+            .iter()
+            .map(|field| format!(
+                "    {}: {},\n",
+                field.name,
+                match field.ty {
+                    crate::model::FieldType::Int => "i64",
+                    crate::model::FieldType::Float => "f32",
+                    crate::model::FieldType::Bool => "bool",
+                    crate::model::FieldType::Str => "String",
+                    crate::model::FieldType::List => "Vec<String>",
+                }
+            ))
+            .collect::<String>(),
+        field_inits = screen
+            .fields
+            .iter()
+            .map(|field| format!("        {}: state.{}.clone(),\n", field.name, field.name))
+            .collect::<String>(),
     )
 }
 
@@ -1490,6 +1527,12 @@ fn titlebar(ui: &mut egui::Ui, title: &str) {{
     let c = close.center();
     painter.line_segment([c + egui::vec2(-4.0, -4.0), c + egui::vec2(4.0, 4.0)], cross);
     painter.line_segment([c + egui::vec2(4.0, -4.0), c + egui::vec2(-4.0, 4.0)], cross);
+    // Двойной клик по полосе — развернуть/вернуть.
+    if drag.double_clicked() {{
+        let maximized = ui.ctx().input(|input| input.viewport().maximized.unwrap_or(false));
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+    }}
     if ui.interact(close, egui::Id::new("lazr:close"), egui::Sense::click()).clicked() {{
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
     }}
@@ -1560,6 +1603,27 @@ label "x""#,
             source.contains("titlebar(ui, \"Т\")"),
             "рамка не вызывается"
         );
+    }
+
+    #[test]
+    fn state_has_no_required_traits_for_custom_fields() {
+        // Свои поля (кисти, текстуры, каналы) не обязаны быть Debug/Clone/Eq,
+        // поэтому State не выводит трейты, а хранилище сравнивает поля модели.
+        let screen = parse(
+            r#"window "Х" 320 220
+store "/tmp/x.store"
+state count int 0
+rust field strokes Vec<Stroke>
+label "x""#,
+        )
+        .expect("модель со своим полем");
+        let source = main_rs(&screen, "h").expect("генерация");
+        assert!(
+            !source.contains("#[derive(Debug, Clone)]\npub struct State"),
+            "State не должен требовать Debug/Clone от своих полей"
+        );
+        assert!(source.contains("struct ModelFields"), "нет слепка полей");
+        assert!(source.contains("fn model_fields"), "нет снимка полей");
     }
 
     #[test]

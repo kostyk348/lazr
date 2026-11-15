@@ -164,6 +164,21 @@ jobs:
           cargo run -q -- live examples/todo.lisp --check | tee /tmp/ci-todo-live.txt
           grep -q 'items: 0 → 1' /tmp/ci-todo-live.txt
           grep -q 'items: 1 → 0' /tmp/ci-todo-live.txt
+      - name: каждая модель .lazr собирается и проходит verify
+        run: |
+          for model in examples/*.lazr; do
+            name=$(basename "$model" .lazr)
+            dir=/tmp/build-$name
+            rm -rf "$dir" && mkdir -p "$dir"
+            cp "$model" "$dir/form.lazr"
+            cargo run -q -- build "$dir"
+            cargo run -q -- verify "$dir" | tail -2
+          done
+      - name: модели отформатированы (lazr fmt --check)
+        run: |
+          for model in examples/*.lazr; do
+            cargo run -q -- fmt "$model" --check
+          done
       - name: все демки чистые (--problems = 0)
         run: |
           for model in examples/*.lisp examples/*.lazr; do

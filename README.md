@@ -98,6 +98,7 @@ hermes mcp add lazr --command lazr --args mcp
 | Состояние | `int`, `float`, `bool`, `string`, `list` (список строк с удалением) |
 | Логика | `if/else`, сравнения (включая строки), арифметика, `append/remove/clear`, `when … else` в раскладке |
 | Проверка | `verify`, `live --check`, `--problems`, `--trace`, два состязательных скрипта для GUI |
+| Канон модели | `lazr fmt FILE\|DIR [--check]` — один смысл = один текст, идемпотентно |
 | Упаковка | `lazr package` → бинарь + иконка из логотипа + `.desktop` + `tar.gz` |
 | Для агента | MCP-сервер внутри: 8 инструментов, `lazr mcp` |
 
@@ -171,6 +172,10 @@ else
 <p align="center">
   <img src="docs/checklist.png" alt="Чек-лист: шаблон строки списка" width="420">
 </p>
+
+История версий — в [CHANGELOG.md](CHANGELOG.md).
+
+История версий — в [CHANGELOG.md](CHANGELOG.md).
 
 ## 42 стиля из коробки
 

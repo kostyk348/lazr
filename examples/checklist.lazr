@@ -1,21 +1,20 @@
-; Чек-лист (строчная модель) — тот же шаблон строки, что и в checklist.lisp.
-window "Чек-лист" 480 420
-theme dark accent:#a371f7 font:15 spacing:8 round:8
-state items list "хлеб,молоко"
-state draft string
+window "Чек-лист" 480x420
+state items list хлеб,молоко
+state draft string 
 state added int 2
+theme dark accent:#a371f7 font:15 round:8
 label "Чек-лист" {size:24, bold}
-label "в списке: {items} · добавлено: {added}" {size:12, color:#8b949e}
+label "в списке: {items} · добавлено: {added}" {color:#8b949e, size:12}
 hbox
-  text-input "что взять" -> draft {grow}
-  button "Добавить" do append items draft; draft = ""; added += 1 {icon:check}
+  text_input "что взять" -> draft {grow}
+  button "Добавить" do append items draft; draft = "" ; added += 1 {icon:check}
 separator
-list -> items "пусто"
+list "пусто" -> items
   hbox
     label "• {item}" {size:15, grow}
     button "убрать" do remove items {size:12, icon:delete}
 separator
 when added > 2
-  label "записей больше двух" {size:12, color:#ffb86b}
+  label "записей больше двух" {color:#ffb86b, size:12}
 else
-  label "можно ещё" {size:12, color:#8b949e}
+  label "можно ещё" {color:#8b949e, size:12}

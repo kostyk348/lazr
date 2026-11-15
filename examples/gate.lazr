@@ -1,17 +1,17 @@
-window "Доступ" 440 400
-theme dark accent:#39d353 font:15 spacing:10 round:10
-state code string
+window "Доступ" 440x400
+state code string 
 state tries int 0
+theme dark accent:#39d353 font:15 spacing:10 round:10
 label "Доступ" {size:24, bold}
-label "попыток: {tries}" {size:12, color:#8b949e}
-text-input "введите код" -> code {grow}
+label "попыток: {tries}" {color:#8b949e, size:12}
+text_input "введите код" -> code {grow}
 hbox
-  button "Проверить" do tries += 1 {icon:check, key:ctrl+enter}
-  button "Сброс" do code = ""; tries = 0
+  button "Проверить" do tries += 1 {key:ctrl+enter, icon:check}
+  button "Сброс" do code = "" ; tries = 0
 separator
 when code == "42"
-  label "открыто" {size:22, bold, color:#39d353}
+  label "открыто" {color:#39d353, size:22, bold}
 when code != "42"
-  label "закрыто" {size:18, color:#e5484d}
+  label "закрыто" {color:#e5484d, size:18}
 when tries >= 3
-  label "подсказка: 42" {size:12, color:#ffb86b}
+  label "подсказка: 42" {color:#ffb86b, size:12}

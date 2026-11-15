@@ -84,6 +84,7 @@ fn main() {
         Some("state") => cmd_state(&args[1..]),
         Some("add") => cmd_add(&args[1..]),
         Some("show") => cmd_show(&args[1..]),
+        Some("fmt") => cmd_fmt(&args[1..]),
         Some("gen") => cmd_gen(&args[1..]),
         Some("build") => cmd_build(&args[1..]),
         Some("run") => cmd_run(&args[1..]),
@@ -115,6 +116,7 @@ fn print_help() {
   state DIR NAME TYPE [VALUE]        int | float | bool | string
   add DIR KIND [TEXT] [--bind F] [--do \"поле += 1\"] [--container vbox|hbox]
   show DIR                           модель как текст
+  fmt FILE|DIR [--check]             привести модель к канону (--check: только проверить)
   gen DIR                             перегенерировать app/
   build DIR
   run DIR                           cargo build --offline в app/
@@ -273,6 +275,60 @@ fn cmd_add(args: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// Канонический вид модели: один и тот же смысл — один и тот же текст.
+/// `--check` ничего не пишет, но возвращает 1, если файл отформатирован иначе.
+fn cmd_fmt(args: &[String]) -> i32 {
+    let opts = Opts::parse(args);
+    let check = opts.has("check");
+    let Some(target) = opts.positional().first().cloned() else {
+        eprintln!("lazr fmt FILE|DIR [--check]");
+        return 2;
+    };
+    let path = std::path::Path::new(&target);
+    let file = if path.is_dir() {
+        path.join("form.lazr")
+    } else {
+        path.to_path_buf()
+    };
+    if file.extension().and_then(|ext| ext.to_str()) == Some("lisp") {
+        eprintln!(
+            "{}: S-выражения — канон сам по себе, форматировать нечего; используйте lazr lisp",
+            file.display()
+        );
+        return 2;
+    }
+    let text = match std::fs::read_to_string(&file) {
+        Ok(text) => text,
+        Err(err) => {
+            eprintln!("не прочитать {}: {err}", file.display());
+            return 1;
+        }
+    };
+    let screen = match model::parse(&text) {
+        Ok(screen) => screen,
+        Err(errors) => {
+            let list: Vec<String> = errors.iter().map(|e| e.to_json()).collect();
+            eprintln!("{{\"ok\":false,\"errors\":[{}]}}", list.join(","));
+            return 1;
+        }
+    };
+    let canonical = model::render(&screen);
+    if canonical == text {
+        println!("{}: уже канон", file.display());
+        return 0;
+    }
+    if check {
+        eprintln!("{}: не канон — запустите lazr fmt", file.display());
+        return 1;
+    }
+    if let Err(err) = std::fs::write(&file, &canonical) {
+        eprintln!("не записать {}: {err}", file.display());
+        return 1;
+    }
+    println!("{}: отформатировано", file.display());
+    0
 }
 
 fn cmd_show(args: &[String]) -> i32 {

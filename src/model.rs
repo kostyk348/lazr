@@ -688,6 +688,26 @@ pub fn unescape(text: &str) -> String {
     out
 }
 
+/// Убирает общий ведущий отступ у непустых строк.
+fn dedent(text: &str) -> String {
+    let indent = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    text.lines()
+        .map(|line| {
+            if line.len() >= indent {
+                line[indent..].to_string()
+            } else {
+                line.trim_start().to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn is_style_token(token: &str) -> bool {
     if !token.starts_with('{') || !token.ends_with('}') {
         return false;
@@ -942,7 +962,9 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
             screen.rust.push(RustBlock {
                 name,
                 kind,
-                code: body.trim().to_string(),
+                // Код блока храним ровно как в файле: render пишет его без
+                // своей отступки, поэтому fmt идемпотентен.
+                code: body.trim_end().trim_start_matches('\n').to_string(),
             });
             continue;
         }
@@ -1581,7 +1603,8 @@ pub fn render(screen: &Screen) -> String {
             RustKind::Fn => out.push_str(&format!("rust fn {} {{\n", block.name)),
         }
         for line in block.code.lines() {
-            out.push_str(&format!("    {line}\n"));
+            out.push_str(line);
+            out.push('\n');
         }
         out.push_str("}\n");
     }
@@ -1727,6 +1750,23 @@ vbox {pad:12}
   hbox {align:center}
     text_input "Имя" -> name {grow}
 "#;
+
+    #[test]
+    fn render_is_idempotent_with_rust_blocks() {
+        // Регрессия: fmt сдвигал блок rust на 4 пробела на каждом проходе.
+        let source = r#"window "Р" 300 200
+rust widget spectrum {
+    let a = 1;
+    if a > 0 {
+        let b = 2;
+    }
+}
+label "x""#;
+        let once = render(&parse(source).expect("разбор"));
+        let twice = render(&parse(&once).expect("разбор после render"));
+        assert_eq!(once, twice, "fmt должен быть идемпотентным");
+        assert!(twice.contains("\n    let a = 1;\n"), "{twice}");
+    }
 
     #[test]
     fn store_survives_render() {
