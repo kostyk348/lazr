@@ -36,12 +36,13 @@ impl Project {
                 Some(dir.join(path))
             }
         });
-        let sheet_text = match sheet {
-            Some(path) => Some(std::fs::read_to_string(&path).map_err(|err| {
-                format!("не прочитать таблицу стилей {}: {err}", path.display())
-            })?),
-            None => None,
-        };
+        let sheet_text =
+            match sheet {
+                Some(path) => Some(std::fs::read_to_string(&path).map_err(|err| {
+                    format!("не прочитать таблицу стилей {}: {err}", path.display())
+                })?),
+                None => None,
+            };
         let screen = model::parse_with_sheet(&text, sheet_text.as_deref()).map_err(|errors| {
             let list: Vec<String> = errors.iter().map(|e| e.to_json()).collect();
             format!("{{\"ok\":false,\"errors\":[{}]}}", list.join(","))

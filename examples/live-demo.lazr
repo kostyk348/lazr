@@ -1,8 +1,8 @@
 window "Живая модель" 560x420
-state count int 0
-state limit int 5
-state name string Аня
-state agree bool false
+state count int "0"
+state limit int "5"
+state name string "Аня"
+state agree bool "false"
 vbox
   label "Нажатий: {count} из {limit}" {color:#69b4ff, size:22, bold}
   hbox

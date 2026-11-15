@@ -1,7 +1,7 @@
 window "Чек-лист" 480x420
-state items list хлеб,молоко
-state draft string 
-state added int 2
+state items list "хлеб,молоко"
+state draft string ""
+state added int "2"
 theme dark accent:#a371f7 font:15 round:8
 label "Чек-лист" {size:24, bold}
 label "в списке: {items} · добавлено: {added}" {color:#8b949e, size:12}

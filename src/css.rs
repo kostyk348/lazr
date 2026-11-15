@@ -198,7 +198,12 @@ fn parse_selector(text: &str) -> Result<Selector, String> {
 }
 
 /// Применить таблицу к дереву виджетов. Стиль из модели не перетирается.
-pub fn apply(widgets: &mut [Widget], rules: &[Rule], theme: &mut Theme, window: &mut WindowOptions) {
+pub fn apply(
+    widgets: &mut [Widget],
+    rules: &[Rule],
+    theme: &mut Theme,
+    window: &mut WindowOptions,
+) {
     for widget in widgets.iter_mut() {
         apply_widget(widget, rules, theme, window);
     }
@@ -244,7 +249,12 @@ fn apply_theme_prop(key: &str, value: &str, theme: &mut Theme, window: &mut Wind
     }
 }
 
-fn apply_widget(widget: &mut Widget, rules: &[Rule], theme: &mut Theme, window: &mut WindowOptions) {
+fn apply_widget(
+    widget: &mut Widget,
+    rules: &[Rule],
+    theme: &mut Theme,
+    window: &mut WindowOptions,
+) {
     let tag = widget.kind.as_str();
     let mut classes = widget.css_classes.clone();
     if let Some(list) = &widget.style.classes {
@@ -329,7 +339,8 @@ fn apply_style_prop(style: &mut Style, key: &str, value: &str) {
 }
 
 /// Описание для справки и подсказок об ошибках.
-pub const HELP: &str = "тег, .класс, #id, тег.класс; свойства — как в {…}: color, size, bold, mono, pill, pad, hint";
+pub const HELP: &str =
+    "тег, .класс, #id, тег.класс; свойства — как в {…}: color, size, bold, mono, pill, pad, hint";
 
 #[allow(dead_code)]
 fn _chrome_is_public(_: Chrome) {}
@@ -346,7 +357,10 @@ mod tests {
         assert_eq!(rules[1].selectors[0].tag.as_deref(), Some("label"));
         assert_eq!(rules[1].selectors[0].class.as_deref(), Some("meta"));
         assert_eq!(rules[1].selectors[1].id.as_deref(), Some("title"));
-        assert!(rules[0].props.iter().any(|(k, v)| k == "color" && v == "#fff"));
+        assert!(rules[0]
+            .props
+            .iter()
+            .any(|(k, v)| k == "color" && v == "#fff"));
     }
 
     #[test]
@@ -354,10 +368,7 @@ mod tests {
         let mut widget = Widget::container(crate::model::WidgetKind::Label);
         widget.css_classes = vec!["meta".to_string()];
         widget.css_id = Some("title".to_string());
-        let rules = parse(
-            "label { size:10; } .meta { size:12; } #title { size:26; }",
-        )
-        .unwrap();
+        let rules = parse("label { size:10; } .meta { size:12; } #title { size:26; }").unwrap();
         let mut theme = Theme::default();
         let mut window = WindowOptions::default();
         apply(&mut [widget.clone()], &rules, &mut theme, &mut window);

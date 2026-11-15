@@ -649,7 +649,10 @@ fn cmd_lisp(args: &[String]) -> i32 {
             // иначе сборка не найдёт файл относительно app/.
             if let Some(sheet) = project.screen.style_sheet.clone() {
                 if let Some(source_dir) = std::path::Path::new(
-                    positional.first().map(String::as_str).unwrap_or("form.lisp"),
+                    positional
+                        .first()
+                        .map(String::as_str)
+                        .unwrap_or("form.lisp"),
                 )
                 .parent()
                 .map(Path::to_path_buf)

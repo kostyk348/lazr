@@ -1,6 +1,6 @@
 window "Доступ" 440x400
-state code string 
-state tries int 0
+state code string ""
+state tries int "0"
 theme dark accent:#39d353 font:15 spacing:10 round:10
 label "Доступ" {size:24, bold}
 label "попыток: {tries}" {color:#8b949e, size:12}

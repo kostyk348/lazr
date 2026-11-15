@@ -1,7 +1,7 @@
 window "Пульт" 820x560
-state demand int 17
-state capacity int 2
-state refreshed int 0
+state demand int "17"
+state capacity int "2"
+state refreshed int "0"
 rust widget card_demand {
     let ratio = (state.demand as f32 / state.capacity.max(1) as f32).min(9.9);
                 ui.label(egui::RichText::new("потребность / ёмкость").size(12.0).color(egui::Color32::from_rgb(139, 148, 158)));

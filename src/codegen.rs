@@ -747,8 +747,11 @@ fn emit_widget(
                     );
                     // В шаблоне строки «remove items» и с глифом значит «удалить строку».
                     if emit.row {
-                        if let Some(rest) =
-                            widget.effect.as_deref().map(str::trim).and_then(|e| e.strip_prefix("remove "))
+                        if let Some(rest) = widget
+                            .effect
+                            .as_deref()
+                            .map(str::trim)
+                            .and_then(|e| e.strip_prefix("remove "))
                         {
                             if rest.split_whitespace().count() == 1 {
                                 out.push_str(&format!(

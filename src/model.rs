@@ -724,7 +724,10 @@ pub fn is_style_token(token: &str) -> bool {
     // либо известный флаг. Блок действия «{ count = 0 }» стилем не считается,
     // иначе код действия уезжает в стили.
     const KEYS: &[&str] = &[
-        "class", "classes", "класс", "id",
+        "class",
+        "classes",
+        "класс",
+        "id",
         "size",
         "кегль",
         "color",
@@ -741,7 +744,15 @@ pub fn is_style_token(token: &str) -> bool {
         "icon",
     ];
     const EXTRA: &[&str] = &[
-        "mono", "моно", "hint", "подсказка", "center", "right", "pill", "чип", "плашка",
+        "mono",
+        "моно",
+        "hint",
+        "подсказка",
+        "center",
+        "right",
+        "pill",
+        "чип",
+        "плашка",
     ];
     let inner = &token[1..token.len() - 1];
     let mut parts = 0;
@@ -864,16 +875,18 @@ fn net_braces(line: &str) -> i32 {
 
 /// Разбор модели вместе с таблицей стилей: каскад применяется после разбора,
 /// поэтому стиль прямо в модели остаётся сильнее таблицы.
-pub fn parse_with_sheet(
-    text: &str,
-    sheet: Option<&str>,
-) -> Result<Screen, Vec<ModelError>> {
+pub fn parse_with_sheet(text: &str, sheet: Option<&str>) -> Result<Screen, Vec<ModelError>> {
     let mut screen = parse(text)?;
     if let Some(sheet) = sheet {
         match crate::css::parse(sheet) {
             Ok(rules) => {
                 crate::css::apply_theme(&rules, &mut screen.theme, &mut screen.window);
-                crate::css::apply(&mut screen.root, &rules, &mut screen.theme, &mut screen.window);
+                crate::css::apply(
+                    &mut screen.root,
+                    &rules,
+                    &mut screen.theme,
+                    &mut screen.window,
+                );
             }
             Err(message) => {
                 return Err(vec![ModelError {
@@ -1248,8 +1261,7 @@ pub fn parse(text: &str) -> Result<Screen, Vec<ModelError>> {
                     let _ = rest.next(); // тип
                     match rest.next() {
                         Some(_) => {
-                            let after_type = trimmed
-                                .trim_start_matches(char::is_whitespace);
+                            let after_type = trimmed.trim_start_matches(char::is_whitespace);
                             // отрезаем три первых токена простым проходом
                             let mut cursor = after_type;
                             for _ in 0..3 {

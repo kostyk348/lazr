@@ -1,7 +1,7 @@
 window "Задачи" 480x560
-state items list 
-state draft string 
-state done int 0
+state items list ""
+state draft string ""
+state done int "0"
 theme dark accent:#388bfd round:8
 label "Задачи" {size:24, bold}
 label "сделано: {done} · в списке: {items}" {color:#8b949e, size:12}

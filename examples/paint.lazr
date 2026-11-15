@@ -1,11 +1,11 @@
 window "Краски" 900x760
-state tool string кисть
-state color string #1b1f24
-state size float 6
-state text string Привет
-state status string готово
-state file string /tmp/paint.ppm
-state dialog_kind string 
+state tool string "кисть"
+state color string "#1b1f24"
+state size float "6"
+state text string "Привет"
+state status string "готово"
+state file string "/tmp/paint.ppm"
+state dialog_kind string ""
 rust field strokes Vec<Stroke> Vec::new()
 rust field undo Vec<Snapshot> Vec::new()
 rust field raster Vec<egui::Color32> Vec::new()
