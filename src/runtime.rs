@@ -105,6 +105,7 @@ struct WindowFlags {
     topmost: bool,
     transparent: bool,
     drag_anywhere: bool,
+    center: bool,
     min: Option<(u32, u32)>,
     max: Option<(u32, u32)>,
 }
@@ -117,6 +118,7 @@ impl WindowFlags {
             topmost: false,
             transparent: false,
             drag_anywhere: false,
+            center: false,
             min: None,
             max: None,
         }
@@ -132,7 +134,7 @@ impl WindowFlags {
             "chrome" => self.own = matches!(value.trim(), "own" | "своя"),
             "resizable" => self.resizable = flag,
             "topmost" => self.topmost = flag,
-            "center" => {}
+            "center" => self.center = flag,
             "transparent" => self.transparent = flag,
             "drag-anywhere" => self.drag_anywhere = flag,
             "min" | "window-min" => self.min = size(value),
@@ -1940,6 +1942,19 @@ impl eframe::App for LiveApp {
         if self.model.window.own {
             let title = self.model.title.clone();
             titlebar(ui, &title);
+        }
+        if self.model.window.center
+            && !ui.data(|data| data.get_temp::<bool>(egui::Id::new("lazr:centered")).unwrap_or(false))
+        {
+            if let Some(monitor) = ui.ctx().input(|input| input.viewport().monitor_size) {
+                let (width, height) = (self.model.width as f32, self.model.height as f32);
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(
+                        (monitor.x - width) / 2.0,
+                        (monitor.y - height) / 2.0,
+                    )));
+                ui.data_mut(|data| data.insert_temp(egui::Id::new("lazr:centered"), true));
+            }
         }
         if self.model.window.drag_anywhere
             && ui

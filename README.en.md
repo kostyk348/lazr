@@ -207,8 +207,8 @@ window "Player" 480 520 chrome:own topmost:yes drag-anywhere:yes min:420x460
 Verified by hand: a `chrome:own` window has no system title bar, the app draws both title and cross, and a
 click on the cross terminates the process. `lazr live` does the same — the live frame matches the built app.
 
-`center` does not move the window yet: position belongs to the window manager, and the model does not know the
-monitor size. That is stated, not hidden.
+`center:yes` centres the window once, using `viewport().monitor_size`; both the generator and `lazr live` do it.
+Verified by measurement: a 1920x1200 monitor with a 420x300 window gives position **750,450** — dead centre.
 
 ## Icons from an external font, and cards
 

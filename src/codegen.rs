@@ -1321,6 +1321,13 @@ fn chrome_call(screen: &Screen) -> String {
             "    if ui.interact(ui.max_rect(), egui::Id::new(\"lazr:drag\"), egui::Sense::drag()).drag_started() {\n        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);\n    }\n",
         );
     }
+    if screen.window.center {
+        code.push_str(&format!(
+            "    if !ui.data(|data| data.get_temp::<bool>(egui::Id::new(\"lazr:centered\")).unwrap_or(false)) {{\n        if let Some(monitor) = ui.ctx().input(|input| input.viewport().monitor_size) {{\n            ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2((monitor.x - {}f32) / 2.0, (monitor.y - {}f32) / 2.0)));\n            ui.data_mut(|data| data.insert_temp(egui::Id::new(\"lazr:centered\"), true));\n        }}\n    }}\n",
+            float_lit(screen.width as f32),
+            float_lit(screen.height as f32)
+        ));
+    }
     code
 }
 
@@ -1360,6 +1367,20 @@ label "x""#,
         assert!(
             source.contains("titlebar(ui, \"Т\")"),
             "рамка не вызывается"
+        );
+    }
+
+    #[test]
+    fn center_emits_outer_position_once() {
+        let screen = parse("window \"Т\" 420 300 center:yes\nlabel \"x\"").expect("окно");
+        let source = main_rs(&screen, "t").expect("генерация");
+        assert!(
+            source.contains("ViewportCommand::OuterPosition"),
+            "нет центрирования"
+        );
+        assert!(
+            source.contains("lazr:centered"),
+            "центрирование не одноразовое"
         );
     }
 
